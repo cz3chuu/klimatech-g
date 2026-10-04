@@ -40,10 +40,17 @@ const POLA = {
   'Wiadomość': 'wiadomosc', 'Źródło zgłoszenia': 'zrodlo',
   // Formularz biura
   'Źródło': 'zrodlo', 'Treść zapytania / notatka z rozmowy': 'wiadomosc', 'Kto wpisuje': 'wprowadzil',
+  // Formularz klienta
+  'Imię i nazwisko': 'osoba', 'Czym jesteś zainteresowany?': 'zainteresowanie', 'Orientacyjna wartość zamówienia (zł)': 'szac_wartosc_pln', 'Zgoda': 'zgoda',
 };
 const out = {};
 for (const [etykieta, pole] of Object.entries(POLA)) if (j[etykieta] !== undefined && j[etykieta] !== '') out[pole] = j[etykieta];
 if (['(nie wiem)', '(ustal z miasta)'].includes(out.wojewodztwo)) delete out.wojewodztwo;
+// pola wielokrotnego wyboru przychodzą jako lista
+if (Array.isArray(out.zainteresowanie)) out.zainteresowanie = out.zainteresowanie.join(', ');
+if (Array.isArray(out.zgoda)) out.zgoda = out.zgoda.length > 0;
+const kim = [].concat(j['Kim jesteś?'] || []).join(', ');
+if (kim) out.wiadomosc = '[' + kim + '] ' + (out.wiadomosc || '');
 // data + godzina kontaktu z formularza biura -> "YYYY-MM-DD HH:mm" (puste = teraz)
 const dk = String(j['Data kontaktu'] || '').slice(0, 10), gk = String(j['Godzina kontaktu'] || '').trim();
 if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dk)) out.data_kontaktu = dk + ' ' + (/^[0-9]{1,2}:[0-9]{2}$/.test(gk) ? gk.padStart(5, '0') : '08:00');
@@ -98,7 +105,7 @@ function build(c) {
         ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX],
         ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
-        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`], ...extraFields,
+        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
@@ -118,27 +125,9 @@ function build(c) {
   const X = (i) => 220 * i;
 
   // ---------- A. Przyjęcie leada ----------
-  const A = wf('KlimatechWfA0001', 'Klimatech A – Przyjęcie leada', [
-    node('Formularz', 'n8n-nodes-base.formTrigger', 2.2, [0, -100], {
-      formTitle: 'Klimatech – zapytanie handlowe',
-      formDescription: 'Makieta formularza ze strony (WordPress). Ania używa go też do wpisywania zapytań z telefonu i maila – wtedy zmienia „Źródło zgłoszenia”.',
-      formFields: {
-        values: [
-          { fieldLabel: 'Firma' },
-          { fieldLabel: 'Osoba kontaktowa' },
-          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333' },
-          { fieldLabel: 'E-mail', fieldType: 'email' },
-          { fieldLabel: 'Miasto' },
-          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: { values: WOJ.map((option) => ({ option })) } },
-          { fieldLabel: 'Zainteresowanie', fieldType: 'dropdown', fieldOptions: { values: ['pompy ciepła', 'klimatyzacja', 'rekuperacja', 'inne'].map((option) => ({ option })) } },
-          { fieldLabel: 'Szacowana wartość (zł)', fieldType: 'number' },
-          { fieldLabel: 'Wiadomość', fieldType: 'textarea' },
-          { fieldLabel: 'Źródło zgłoszenia', fieldType: 'dropdown', fieldOptions: { values: ['formularz', 'mail', 'telefon'].map((option) => ({ option })) } },
-        ],
-      },
-      options: { appendAttribution: false, buttonLabel: 'Wyślij zapytanie', path: 'klimatech', respondWithOptions: { values: { respondWith: 'text', formSubmittedText: 'Dziękujemy! Handlowiec z Twojego regionu oddzwoni najpóźniej w ciągu jednego dnia roboczego.' } } },
-    }, { webhookId: uid('f0f0f0f0') }),
-    node('Webhook', 'n8n-nodes-base.webhook', 2, [0, 100], {
+  const A = wf('KlimatechWfA0001', 'Klimatech A – Webhook strony WWW', [
+    // Wejście ze strony WWW: wtyczka formularza WordPress wysyła JSON (makieta strony: workflow H)
+    node('Webhook', 'n8n-nodes-base.webhook', 2, [0, 0], {
       httpMethod: 'POST', path: 'lead', responseMode: 'lastNode', responseData: 'firstEntryJson', options: { allowedOrigins: '*' },
     }, { webhookId: uid('e0e0e0e0') }),
     code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
@@ -146,7 +135,7 @@ function build(c) {
     getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(4), 0], 'Leady'),
     code('Przetwórz lead', [X(5), 0], dist('A-przetworz-lead.js')),
-    ifTrue('Czy poprawny?', [X(6), 0], '={{ $json.valid }}'),
+    ifTrue('Czy poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
     code('Wiersz do zapisu', [X(7), -100], "return [{ json: $('Przetwórz lead').first().json.row }];"),
     append('Zapisz lead', [X(8), -100], 'Leady'),
     code('Historia', [X(9), -100], "return $('Przetwórz lead').first().json.historia.map((h) => ({ json: h }));"),
@@ -159,7 +148,6 @@ function build(c) {
     code('Odpowiedź', [X(15), -100], "// Odpowiedź dla webhooka (JSON z lead_id, routingiem, duplikatem)\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
     code('Błąd walidacji', [X(7), 100], "// Nic nie zapisujemy – zwracamy listę błędów\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
   ], {
-    Formularz: { main: [[{ node: 'Zgłoszenie', type: 'main', index: 0 }]] },
     Webhook: { main: [[{ node: 'Zgłoszenie', type: 'main', index: 0 }]] },
     ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Czy poprawny?'),
     'Czy poprawny?': { main: [[{ node: 'Wiersz do zapisu', type: 'main', index: 0 }], [{ node: 'Błąd walidacji', type: 'main', index: 0 }]] },
@@ -320,10 +308,66 @@ return out;`, { executeOnce: true }),
     'Wyniki': { main: [[to('Zapisz wynik w wierszu')]] },
   });
 
-  // ---------- G. Formularz biura (Ania: telefony, maile, targi, polecenia) ----------
+  // ---------- Formularze z własną stroną wyniku (G – biuro, H – klient) – wspólna budowa ----------
   const PL = "$('Przetwórz lead').first().json";
   const opcje = (a) => ({ values: a.map((option) => ({ option })) });
-  const G = wf('KlimatechWfG0001', 'Klimatech G – Formularz biura', [
+  const formWf = (id, name, trigger, glue) => wf(id, name, [
+    trigger,
+    code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
+    konfiguracja([X(2), 0]),
+    getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
+    getRows('Pobierz leady', [X(4), 0], 'Leady'),
+    code('Przetwórz lead', [X(5), 0], dist(glue)),
+    ifTrue('Nowy i poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
+    code('Wiersz do zapisu', [X(7), -100], 'return [{ json: ' + PL + '.row }];'),
+    append('Zapisz lead', [X(8), -100], 'Leady'),
+    code('Historia', [X(9), -100], 'return ' + PL + '.historia.map((h) => ({ json: h }));'),
+    append('Zapisz historię', [X(10), -100], 'Historia'),
+    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
+    gmail('Wyślij mail', [X(12), -200], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true, onError: 'continueRegularOutput' }),
+    ifExpr('WhatsApp?', [X(13), -100], `={{ !!${PL}.whatsapp }}`),
+    waSend('Wyślij WhatsApp', [X(14), -200], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
+    node('Podsumowanie', 'n8n-nodes-base.form', 1, [X(15), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }, { executeOnce: true }),
+    // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, pokazujemy stronę z wyjaśnieniem
+    node('Popraw dane / już mamy', 'n8n-nodes-base.form', 1, [X(7), 100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
+  ], {
+    [trigger.name]: { main: [[to('Zgłoszenie')]] },
+    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Nowy i poprawny?'),
+    'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Popraw dane / już mamy')]] },
+    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
+    'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
+    'Wyślij mail': { main: [[to('WhatsApp?')]] },
+    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Podsumowanie')]] },
+    'Wyślij WhatsApp': { main: [[to('Podsumowanie')]] },
+  });
+
+  // ---------- H. Formularz klienta (makieta formularza ze strony WWW) ----------
+  const H = formWf('KlimatechWfH0001', 'Klimatech H – Formularz klienta (makieta strony)',
+    node('Formularz klienta', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
+      formTitle: 'Zapytanie ofertowe – Klimatech',
+      formDescription: 'Pompy ciepła, klimatyzacja i rekuperacja dla instalatorów i inwestorów. Zostaw kontakt – doradca z Twojego województwa oddzwoni najpóźniej w ciągu jednego dnia roboczego (pn–pt 8–16).',
+      formFields: {
+        values: [
+          { fieldLabel: 'Firma', placeholder: 'np. Instal-Tech Kowalczyk', requiredField: true },
+          { fieldLabel: 'Imię i nazwisko', requiredField: true },
+          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333', requiredField: true },
+          { fieldLabel: 'E-mail', fieldType: 'email', placeholder: 'opcjonalnie' },
+          { fieldLabel: 'Miasto', requiredField: true },
+          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(WOJ), requiredField: true },
+          { fieldLabel: 'Czym jesteś zainteresowany?', fieldType: 'checkbox', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja']), requiredField: true },
+          { fieldLabel: 'Kim jesteś?', fieldType: 'radio', fieldOptions: opcje(['instalator / firma instalacyjna', 'hurtownia', 'deweloper / inwestor', 'klient indywidualny']) },
+          { fieldLabel: 'Orientacyjna wartość zamówienia (zł)', fieldType: 'number', placeholder: 'opcjonalnie' },
+          { fieldLabel: 'Wiadomość', fieldType: 'textarea', placeholder: 'np. ile urządzeń, na kiedy, jaki obiekt' },
+          { fieldLabel: 'Zgoda', fieldType: 'checkbox', fieldOptions: opcje(['Zgadzam się na kontakt telefoniczny i mailowy w sprawie tego zapytania. Administratorem danych jest Klimatech.']), requiredField: true },
+        ],
+      },
+      responseMode: 'lastNode',
+      options: { appendAttribution: false, buttonLabel: 'Wyślij zapytanie', path: 'klimatech' },
+    }, { webhookId: uid('f0f0f0f0') }),
+    'H-formularz-klienta.js');
+
+  // ---------- G. Formularz biura (propozycja zamiast wpisywania w arkusz) ----------
+  const G = formWf('KlimatechWfG0001', 'Klimatech G – Formularz biura',
     node('Formularz biura', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
       formTitle: 'Klimatech – wpisz lead (biuro)',
       formDescription: 'Dla zapytań z telefonu, maila, targów i poleceń. Lead trafi do handlowca z województwa tak samo jak z formularza na stronie. Podaj telefon albo e-mail.',
@@ -347,34 +391,9 @@ return out;`, { executeOnce: true }),
       responseMode: 'lastNode',
       options: { appendAttribution: false, buttonLabel: 'Zapisz i przekaż handlowcowi', path: 'biuro' },
     }, { webhookId: uid('b10b10b1') }),
-    code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
-    konfiguracja([X(2), 0]),
-    getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
-    getRows('Pobierz leady', [X(4), 0], 'Leady'),
-    code('Przetwórz lead', [X(5), 0], dist('G-formularz-biura.js')),
-    ifTrue('Czy poprawny?', [X(6), 0], '={{ $json.valid }}'),
-    code('Wiersz do zapisu', [X(7), -100], 'return [{ json: ' + PL + '.row }];'),
-    append('Zapisz lead', [X(8), -100], 'Leady'),
-    code('Historia', [X(9), -100], 'return ' + PL + '.historia.map((h) => ({ json: h }));'),
-    append('Zapisz historię', [X(10), -100], 'Historia'),
-    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
-    gmail('Wyślij mail', [X(12), -200], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true, onError: 'continueRegularOutput' }),
-    ifExpr('WhatsApp?', [X(13), -100], `={{ !!${PL}.whatsapp }}`),
-    waSend('Wyślij WhatsApp', [X(14), -200], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
-    node('Podsumowanie', 'n8n-nodes-base.form', 1, [X(15), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }, { executeOnce: true }),
-    node('Popraw dane', 'n8n-nodes-base.form', 1, [X(7), 100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
-  ], {
-    'Formularz biura': { main: [[to('Zgłoszenie')]] },
-    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Czy poprawny?'),
-    'Czy poprawny?': { main: [[to('Wiersz do zapisu')], [to('Popraw dane')]] },
-    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
-    'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
-    'Wyślij mail': { main: [[to('WhatsApp?')]] },
-    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Podsumowanie')]] },
-    'Wyślij WhatsApp': { main: [[to('Podsumowanie')]] },
-  });
+    'G-formularz-biura.js');
 
-  return { 'G-formularz-biura': G, 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
+  return { 'H-formularz-klienta': H, 'G-formularz-biura': G, 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
 }
 
 function write(dir, cfg) {

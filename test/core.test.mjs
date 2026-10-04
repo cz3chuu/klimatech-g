@@ -270,5 +270,26 @@ test('G: strona po wysłaniu formularza biura – podsumowanie, ostrzeżenie o d
   assert.match(html, /ustalone z miasta/);
   const zle = core.biuroPage(core.processInquiry({ firma: 'X', telefon: '600 12' }, rows, handlowcy, cfgWa, 'x'), '/form/biuro');
   assert.match(zle, /❌ Lead nie został zapisany/);
-  assert.match(zle, /Niepoprawny numer telefonu/);
+  assert.match(zle, /jest niepełny lub błędny/);
+});
+test('H: formularz klienta – podziękowanie z numerem, po godzinach termin, powtórka bez drugiego leada', () => {
+  const inp = { firma: 'Nowa', osoba: 'Jan Nowak', telefon: '700 600 500', miasto: 'Gdańsk', wojewodztwo: 'pomorskie', zgoda: true };
+  const r1 = core.processInquiry(inp, rows, handlowcy, cfgWa, '2026-10-05 10:00');
+  const html = core.klientPage(r1, '/form/klimatech');
+  assert.match(html, /Dziękujemy, Jan!/);
+  assert.match(html, /\+48 700 600 500/);
+  assert.match(html, /Ewa Sowa/);
+  assert.match(r1.historia[0].szczegoly, /zgoda na kontakt \(RODO\): tak/);
+  const sob = core.klientPage(core.processInquiry(inp, rows, handlowcy, cfgWa, '2026-10-10 11:00'), '/f');
+  assert.match(sob, /poniedziałek 12\.10 od 8:00/);
+  // to samo wysłane 3 minuty później -> powtórka, nic nie zapisujemy
+  const r2 = core.processInquiry(inp, [...rows, r1.row], handlowcy, cfgWa, '2026-10-05 10:03');
+  assert.equal(r2.powtorka, true);
+  assert.equal(r2.row.lead_id, r1.row.lead_id);
+  assert.match(core.klientPage(r2, '/f'), /już do nas dotarło/);
+  // poprawiony numer -> nowe zgłoszenie (nie powtórka)
+  const r3 = core.processInquiry({ ...inp, telefon: '700 600 501' }, [...rows, r1.row], handlowcy, cfgWa, '2026-10-05 10:05');
+  assert.equal(r3.powtorka, undefined);
+  // po 30 minutach ten sam numer = prawdziwe ponowienie
+  assert.equal(core.processInquiry(inp, [...rows, r1.row], handlowcy, cfgWa, '2026-10-05 10:45').response.duplikat.typ, 'pewny');
 });

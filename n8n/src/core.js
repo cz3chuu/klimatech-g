@@ -402,9 +402,10 @@ function validateInput(inp) {
   const errors = [];
   if (!String(inp.firma || '').trim() && !String(inp.osoba || '').trim()) errors.push('Podaj firmę lub osobę kontaktową.');
   const tel = normalizePhone(inp.telefon), mail = normalizeEmail(inp.email);
-  if (!tel && !mail) errors.push('Podaj poprawny telefon (9 cyfr) lub e-mail.');
-  if (String(inp.telefon || '').trim() && !tel) errors.push('Niepoprawny numer telefonu.');
-  if (String(inp.email || '').trim() && !mail) errors.push('Niepoprawny adres e-mail.');
+  const telWpisany = String(inp.telefon || '').trim(), mailWpisany = String(inp.email || '').trim();
+  if (telWpisany && !tel) errors.push(`Numer telefonu „${telWpisany}” jest niepełny lub błędny – podaj 9 cyfr, np. 601 222 333.`);
+  if (mailWpisany && !mail) errors.push(`Adres e-mail „${mailWpisany}” jest niepoprawny.`);
+  if (!telWpisany && !mailWpisany) errors.push('Podaj telefon (9 cyfr) lub e-mail.');
   return errors;
 }
 
@@ -464,11 +465,36 @@ function dataKontaktu(inp, now) {
   return parseLocal(d) && d.slice(0, 16) <= now ? d.slice(0, 16) : now;
 }
 
+const POWTORKA_MIN = 30;
+function powtorneWyslanie(row, existing, now) {
+  const t = parseLocal(now);
+  if (!t) return null;
+  return existing.find((r) => {
+    const d = parseLocal(r.data_zgloszenia);
+    if (!r.lead_id || !d || String(r.zrodlo || '') !== row.zrodlo) return false;
+    const min = (t - d) / 6e4;
+    if (min < 0 || min > POWTORKA_MIN) return false;
+    // ten sam telefon (a jeśli podano e-mail – ten sam e-mail). Poprawiony numer = nowe zgłoszenie, nie powtórka.
+    const tel = row.telefon_norm && normalizePhone(r.telefon_norm || r.telefon) === row.telefon_norm;
+    const mail = !row.email || normalizeEmail(r.email) === row.email;
+    return row.telefon_norm ? tel && mail : row.email && normalizeEmail(r.email) === row.email;
+  }) || null;
+}
+
 function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   const errors = validateInput(inp);
   if (errors.length) return { valid: false, errors, response: { ok: false, errors } };
 
   const { row, dup } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now) });
+  // Podwójne kliknięcie / ponowne wysłanie tych samych danych w ciągu 30 min: nie zapisujemy drugi raz i nie alarmujemy handlowca
+  const powt = powtorneWyslanie(row, existing, now);
+  if (powt) {
+    return {
+      valid: true, powtorka: true, row: powt, historia: [],
+      response: { ok: true, powtorka: true, lead_id: powt.lead_id, przypisano: powt.handlowiec || recipientFor(powt, handlowcyRows, cfg).nazwa,
+        wojewodztwo: powt.wojewodztwo, telefon_norm: powt.telefon_norm, sla_start: slaStart(powt.data_zgloszenia) },
+    };
+  }
   const wprowadzil = String(inp.wprowadzil || '').trim() || (row.zrodlo === 'formularz' ? 'formularz WWW' : 'Ania (biuro)');
   const original = dup && dup.original;
   const pewny = dup && dup.typ === 'pewny' && original;
@@ -532,7 +558,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
     : null;
 
   const historia = [
-    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: wprowadzil, szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})${row.data_zgloszenia !== now ? `; kontakt klienta: ${row.data_zgloszenia}` : ''}` },
+    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: wprowadzil, szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})${row.data_zgloszenia !== now ? `; kontakt klienta: ${row.data_zgloszenia}` : ''}${inp.zgoda ? '; zgoda na kontakt (RODO): tak' : ''}` },
   ];
   if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', kto: 'system', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
   historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
@@ -576,6 +602,7 @@ function processInbox(wpisy, existing, handlowcyRows, cfg, now) {
     SKRZYNKA_POLA.forEach((k) => { inp[k] = w[k]; });
     inp.zrodlo = String(inp.zrodlo || '').trim() || 'telefon';
     const r = processInquiry(inp, baza, handlowcyRows, cfg, now);
+    if (r.powtorka) { out.wyniki.push({ row_number: w.row_number, wynik: `↩ Już zapisany jako ${r.row.lead_id} (ten sam wiersz wysłany ponownie) · ${now}`, lead_id: r.row.lead_id }); continue; }
     if (!r.valid) {
       out.wyniki.push({ row_number: w.row_number, wynik: `❌ ${r.errors.join(' ')} Popraw wiersz i wyczyść tę kolumnę.`, lead_id: '' });
       continue;
@@ -593,6 +620,35 @@ function processInbox(wpisy, existing, handlowcyRows, cfg, now) {
   return out;
 }
 
+// Strona dla klienta po wysłaniu formularza ze strony (workflow H). Pokazuje numer, na który oddzwonimy –
+// klient sam wyłapie literówkę. Po godzinach pracy mówi uczciwie, kiedy zadzwonimy.
+function klientPage(wynik, formUrl) {
+  const css = 'font-family:Arial,sans-serif;max-width:560px;margin:24px auto;padding:28px;border-radius:14px;color:#142029;line-height:1.5';
+  const ponownie = `<p style="margin-top:18px"><a href="${esc(formUrl)}" style="color:#0e5c88;font-weight:bold">Wyślij formularz ponownie</a></p>`;
+  if (!wynik.valid) {
+    return `<div style="${css};background:#fae5e2"><h2 style="margin:0 0 8px;color:#b42318">Sprawdź dane w formularzu</h2>
+<ul>${wynik.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+<p>Zgłoszenie nie zostało jeszcze wysłane.</p>
+<p><a href="${esc(formUrl)}" style="display:inline-block;padding:10px 16px;background:#b42318;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Wypełnij formularz ponownie</a></p></div>`;
+  }
+  const r = wynik.row, o = wynik.response;
+  const dzien = (s) => { const d = parseLocal(s); return d ? ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'][d.getUTCDay()] + ' ' + s.slice(8, 10) + '.' + s.slice(5, 7) : ''; };
+  const poGodzinach = o.sla_start && r.data_zgloszenia && o.sla_start !== String(r.data_zgloszenia).slice(0, 16);
+  const kiedy = poGodzinach
+    ? `Pracujemy pn–pt 8–16, dlatego zadzwonimy w <b>${esc(dzien(o.sla_start))} od 8:00</b>.`
+    : 'Zadzwonimy <b>najpóźniej w ciągu jednego dnia roboczego</b>, zwykle znacznie szybciej.';
+  const doradca = r.routing === 'handlowiec' && o.przypisano ? `Twój doradca z regionu ${esc(r.wojewodztwo)}: <b>${esc(o.przypisano)}</b>.` : 'Zgłoszenie przejmie nasz dział handlowy.';
+  const numer = r.telefon_norm ? `Oddzwonimy na numer <b style="font-size:18px">${esc(formatPhone(r.telefon_norm))}</b>.` : `Odpowiemy na adres <b>${esc(r.email)}</b>.`;
+  if (wynik.powtorka) {
+    return `<div style="${css};background:#e2eef6"><h2 style="margin:0 0 8px;color:#0e5c88">To zgłoszenie już do nas dotarło</h2>
+<p>Mamy je pod numerem <b>${esc(r.lead_id)}</b> – nie trzeba wysyłać go ponownie. ${numer}</p><p>${kiedy}</p></div>`;
+  }
+  return `<div style="${css};background:#e3f3e8"><h2 style="margin:0 0 8px;color:#17803d">Dziękujemy${r.osoba ? ', ' + esc(r.osoba.split(' ')[0]) : ''}! Zapytanie przyjęte.</h2>
+<p>Numer zgłoszenia: <b>${esc(r.lead_id)}</b>. ${doradca}</p>
+<p>${numer}<br>${kiedy}</p>
+<p style="padding:10px 12px;background:#fff;border-radius:8px;font-size:14px">Numer się nie zgadza? Wyślij formularz jeszcze raz z poprawnym numerem – przekażemy go doradcy razem z tym zgłoszeniem.</p>${ponownie}</div>`;
+}
+
 // Strona po wysłaniu „Formularza biura” (workflow G): co zapisano i komu przydzielono – tu Ania wyłapuje literówki
 function biuroPage(wynik, formUrl) {
   const box = (kolor, tlo, tresc) => `<div style="font-family:Arial,sans-serif;max-width:560px;margin:24px auto;padding:24px;border-radius:12px;background:${tlo};color:#142029">${tresc}</div>`;
@@ -600,7 +656,7 @@ function biuroPage(wynik, formUrl) {
   if (!wynik.valid) {
     return box('#b42318', '#fae5e2', `<h2 style="margin:0 0 8px;color:#b42318">❌ Lead nie został zapisany</h2>
 <ul>${wynik.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
-<p>Wróć do formularza (strzałka „wstecz” w przeglądarce), popraw dane i wyślij ponownie. Nic nie trafiło do handlowców.</p>`);
+<p>Nic nie trafiło do handlowców.</p>${nowy.replace('Wpisz kolejny lead', 'Wpisz ponownie')}`);
   }
   const r = wynik.row, o = wynik.response, d = o.duplikat;
   const woj = r.wojewodztwo ? `${esc(r.wojewodztwo)}${r.wojewodztwo_zrodlo === 'miasto' ? ' <i>(ustalone z miasta – sprawdź)</i>' : ''}` : '<b style="color:#b45309">nieustalone – lead czeka na przypisanie</b>';
@@ -722,6 +778,6 @@ if (typeof module !== 'undefined') {
     parseLocal, formatLocal, nowWarsaw, holidays, isBusinessTime, businessMinutes, slaStart, slaLevel,
     normalizePhone, normalizeEmail, companyKey, normalizeWojewodztwo, findDuplicate, parseHandlowcy, route,
     buildLeadRow, processInquiry, applyStatusClick, checkSla, groupSlaEmails, makeToken,
-    waChatId, parseWaReply, applyStatus, processWaReplies, groupSlaWhatsapp, processInbox, doPrzetworzenia, biuroPage,
+    waChatId, parseWaReply, applyStatus, processWaReplies, groupSlaWhatsapp, processInbox, doPrzetworzenia, biuroPage, klientPage,
   };
 }
