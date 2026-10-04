@@ -146,11 +146,14 @@ ol.tl li:last-child::before { display: none; }
 .bar i { display: block; height: 100%; background: var(--ok); }
 
 /* --- logowanie --- */
-.login { max-width: 380px; margin: 10vh auto; padding: 24px; display: grid; gap: 14px; }
+.login { max-width: 380px; width: calc(100% - 32px); margin: 10vh auto; padding: 24px; display: grid; gap: 14px; }
 .login h1 { margin: 0; font: 700 26px/1.2 var(--f-display); }
 .login label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
 .login input { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .err { color: var(--bad); font-size: 14px; }
+.err:empty, .ok-msg:empty { display: none; }
+.ok-msg { color: var(--ok); font-size: 14px; }
+.link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .empty { padding: 40px 20px; text-align: center; color: var(--muted); }
 
 @media (max-width: 980px) {
@@ -166,13 +169,16 @@ ol.tl li:last-child::before { display: none; }
 
 <section id="ekran-logowania" class="panel login" hidden>
   <h1>Klimatech CRM</h1>
-  <p class="muted" style="margin:0">Leady, kontakty i historia rozmów. Zaloguj się kontem nadanym w Supabase.</p>
+  <p class="muted" style="margin:0">Leady, kontakty i historia rozmów w jednym miejscu. Zaloguj się albo załóż konto.</p>
   <form id="form-logowania" novalidate>
     <div style="display:grid;gap:12px">
       <label for="email">E-mail<input id="email" type="email" autocomplete="username" required></label>
-      <label for="haslo">Hasło<input id="haslo" type="password" autocomplete="current-password" required></label>
+      <label for="haslo">Hasło<input id="haslo" type="password" autocomplete="current-password" required minlength="8"></label>
+      <label for="haslo2" id="pole-haslo2" hidden>Powtórz hasło<input id="haslo2" type="password" autocomplete="new-password" minlength="8"></label>
       <button class="btn primary" type="submit" id="zaloguj">Zaloguj</button>
       <div class="err" id="blad-logowania" role="alert"></div>
+      <div class="ok-msg" id="info-logowania" role="status"></div>
+      <p class="muted" style="margin:0;font-size:14px"><span id="tryb-pytanie">Nie masz konta?</span> <button class="link" type="button" id="przelacz-tryb">Załóż konto</button></p>
     </div>
   </form>
 </section>
@@ -262,12 +268,41 @@ else {
   db.auth.getSession().then(({ data }) => (data.session ? start() : pokazLogowanie()));
 }
 function pokazLogowanie() { $('aplikacja').hidden = true; $('ekran-logowania').hidden = false; $('email').focus(); }
+let rejestracja = false;
+$('przelacz-tryb').addEventListener('click', () => {
+  rejestracja = !rejestracja;
+  $('pole-haslo2').hidden = !rejestracja;
+  $('zaloguj').textContent = rejestracja ? 'Załóż konto' : 'Zaloguj';
+  $('tryb-pytanie').textContent = rejestracja ? 'Masz już konto?' : 'Nie masz konta?';
+  $('przelacz-tryb').textContent = rejestracja ? 'Zaloguj się' : 'Załóż konto';
+  $('haslo').autocomplete = rejestracja ? 'new-password' : 'current-password';
+  $('blad-logowania').textContent = ''; $('info-logowania').textContent = '';
+});
 $('form-logowania').addEventListener('submit', async (e) => {
   e.preventDefault();
-  $('blad-logowania').textContent = ''; $('zaloguj').disabled = true;
-  const { error } = await db.auth.signInWithPassword({ email: $('email').value.trim(), password: $('haslo').value });
+  const email = $('email').value.trim(), haslo = $('haslo').value;
+  $('blad-logowania').textContent = ''; $('info-logowania').textContent = '';
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('blad-logowania').textContent = 'Wpisz poprawny adres e-mail.'; return; }
+  if (haslo.length < 8) { $('blad-logowania').textContent = 'Hasło musi mieć co najmniej 8 znaków.'; return; }
+  if (rejestracja && haslo !== $('haslo2').value) { $('blad-logowania').textContent = 'Hasła nie są takie same.'; return; }
+  $('zaloguj').disabled = true;
+  if (rejestracja) {
+    const { data, error } = await db.auth.signUp({ email, password: haslo, options: { emailRedirectTo: location.origin } });
+    $('zaloguj').disabled = false;
+    if (error) { $('blad-logowania').textContent = 'Nie udało się założyć konta: ' + error.message; return; }
+    if (data.session) { $('haslo').value = $('haslo2').value = ''; return start(); }
+    $('info-logowania').textContent = 'Konto założone. Kliknij link potwierdzający w mailu od Supabase, a potem zaloguj się tutaj.';
+    $('przelacz-tryb').click();
+    return;
+  }
+  const { error } = await db.auth.signInWithPassword({ email, password: haslo });
   $('zaloguj').disabled = false;
-  if (error) { $('blad-logowania').textContent = 'Nie udało się zalogować: sprawdź e-mail i hasło (konto zakłada się w Supabase → Authentication).'; return; }
+  if (error) {
+    $('blad-logowania').textContent = /confirm/i.test(error.message)
+      ? 'Adres e-mail nie jest jeszcze potwierdzony – kliknij link w mailu od Supabase.'
+      : 'Nie udało się zalogować: sprawdź e-mail i hasło albo załóż konto.';
+    return;
+  }
   $('haslo').value = ''; start();
 });
 $('wyloguj').addEventListener('click', async () => { clearInterval(timer); await db.auth.signOut(); pokazLogowanie(); });
