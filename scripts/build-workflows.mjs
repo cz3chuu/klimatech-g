@@ -276,7 +276,45 @@ return out;`, { executeOnce: true }),
     ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
   });
 
-  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E };
+  // ---------- F. Skrzynka „Wpisz lead” (telefony i maile wpisywane przez biuro, później AI) ----------
+  const P = "$('Przetwórz skrzynkę').first().json";
+  const F = wf('KlimatechWfF0001', 'Klimatech F – Skrzynka „Wpisz lead” (co 1 min)', [
+    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
+    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
+    konfiguracja([X(1), 0]),
+    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
+    getRows('Pobierz leady', [X(3), 0], 'Leady'),
+    getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead'),
+    code('Przetwórz skrzynkę', [X(5), 0], dist('F-skrzynka.js')),
+    // gałąź 1 (wykonuje się pierwsza): zapis leadów i historii, potem powiadomienia
+    code('Nowe leady', [X(6), -200], `return ${P}.leady.map((r) => ({ json: r }));`),
+    append('Zapisz leady', [X(7), -200], 'Leady'),
+    code('Wpisy historii', [X(8), -200], `return ${P}.historia.map((h) => ({ json: h }));`),
+    append('Zapisz historię', [X(9), -200], 'Historia'),
+    code('Maile', [X(10), -300], `if (String(${K('KANAL')} || 'mail') === 'whatsapp') return [];\nreturn ${P}.emaile.map((e) => ({ json: e }));`, { executeOnce: true }),
+    gmail('Wyślij mail', [X(11), -300], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}', { onError: 'continueRegularOutput' }),
+    code('Wiadomości WhatsApp', [X(10), -100], `return ${P}.whatsapp.map((w) => ({ json: w }));`, { executeOnce: true }),
+    waSend('Wyślij WhatsApp', [X(11), -100], '$json.chatId', '$json.message'),
+    // gałąź 2: informacja zwrotna dla Ani w wierszu (✅ / ⚠ / ❌)
+    code('Wyniki', [X(6), 200], `return ${P}.wyniki.map((w) => ({ json: w }));`),
+    node('Zapisz wynik w wierszu', 'n8n-nodes-base.googleSheets', 4.7, [X(7), 200], {
+      authentication: 'oAuth2', resource: 'sheet', operation: 'update', documentId: doc, sheetName: sheet('Wpisz lead'),
+      columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: ['row_number'], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
+      options: { cellFormat: 'RAW' },
+    }, { credentials: sheetsCred }),
+  ], {
+    'Co minutę': { main: [[to('Konfiguracja')]] },
+    'Test ręczny': { main: [[to('Konfiguracja')]] },
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Przetwórz skrzynkę'),
+    'Przetwórz skrzynkę': { main: [[to('Nowe leady'), to('Wyniki')]] },
+    ...chain('Nowe leady', 'Zapisz leady', 'Wpisy historii', 'Zapisz historię'),
+    'Zapisz historię': { main: [[to('Maile'), to('Wiadomości WhatsApp')]] },
+    'Maile': { main: [[to('Wyślij mail')]] },
+    'Wiadomości WhatsApp': { main: [[to('Wyślij WhatsApp')]] },
+    'Wyniki': { main: [[to('Zapisz wynik w wierszu')]] },
+  });
+
+  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
 }
 
 function write(dir, cfg) {

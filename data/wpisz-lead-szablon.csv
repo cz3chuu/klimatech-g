@@ -1,0 +1,4 @@
+data_kontaktu,zrodlo,firma,osoba,telefon,email,miasto,wojewodztwo,zainteresowanie,szac_wartosc_pln,wiadomosc,wprowadzil,akcja,wynik,lead_id
+2026-10-05 09:10,telefon,Hydro-Term Słupsk,Adam Kowal,700 310 410,,Słupsk,,pompy ciepła,26000,"Dzwonił rano, chce cennik dla instalatora i płatność 30 dni",Ania (biuro),,,
+,mail,Termex ZPH,W. Kozłowski,629 707 505,w.kozlowski@termex.example,Płock,mazowieckie,pompy ciepła,33000,"Trzeci mail w tej sprawie, czeka na ofertę",Ania (biuro),,,
+,telefon,Pan Zbigniew (bez nazwy firmy),Zbigniew,,,Opole,opolskie,klimatyzacja,6000,"Nie zostawił numeru, oddzwoni",Ania (biuro),,,

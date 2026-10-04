@@ -226,3 +226,39 @@ test('n8n/dist: "Przygotuj dane" (E) – paczki dla Supabase bez tokenu, z klien
   assert.equal(out[2].rows.length, historia.length); // duplikat wpisu odfiltrowany
   assert.equal(new Set(out[1].rows.map((r) => Object.keys(r).join())).size, 1); // jednakowe klucze – wymóg upsertu
 });
+
+// --- skrzynka „Wpisz lead” (wpisy Ani: telefony, maile; później AI) ---
+test('Skrzynka: kilka wierszy naraz – przydział, duplikat między wierszami, błąd zostaje do poprawki', () => {
+  const wpisy = [
+    { row_number: 2, zrodlo: 'telefon', firma: 'Nowa Firma Gdynia', telefon: '700 555 001', miasto: 'Gdynia', wiadomosc: 'dzwonił rano', data_kontaktu: '2026-10-05 09:10' },
+    { row_number: 3, zrodlo: 'mail', firma: 'Nowa Firma Gdynia sp. z o.o.', telefon: '700-555-001', miasto: 'Gdynia' }, // ten sam telefon co wiersz 2
+    { row_number: 4, zrodlo: 'telefon', firma: 'Bez kontaktu' },
+    { row_number: 5, firma: 'Już przetworzony', telefon: '700 555 002', wynik: '✅ L-041' },
+    { row_number: 6, firma: 'Propozycja AI', telefon: '700 555 003', akcja: 'SPRAWDŹ' },
+    { row_number: 7 }, // pusty wiersz
+  ];
+  const out = core.processInbox(wpisy, rows, handlowcy, cfgWa, '2026-10-05 11:00');
+  assert.equal(out.wyniki.length, 3);
+  assert.match(out.wyniki[0].wynik, /^✅ L-041 → Ewa Sowa \(pomorskie\)/);
+  assert.match(out.wyniki[1].wynik, /^⚠ L-042 – ponowienie L-041/);
+  assert.match(out.wyniki[2].wynik, /^❌ .*telefon/);
+  assert.equal(out.leady.length, 2);
+  assert.equal(out.leady[0].data_zgloszenia, '2026-10-05 09:10'); // SLA od faktycznego telefonu
+  assert.equal(out.historia.find((h) => h.zdarzenie === 'utworzono').kto, 'Ania (biuro)');
+  assert.equal(out.whatsapp.length, 2);
+});
+test('Skrzynka: przyszła data kontaktu i AI do zatwierdzenia', () => {
+  const out = core.processInbox([{ row_number: 2, firma: 'X', telefon: '700 555 004', data_kontaktu: '2030-01-01 10:00', wprowadzil: 'AI z maila, zatwierdziła Ania', akcja: 'OK' }], rows, handlowcy, cfgWa, '2026-10-05 11:00');
+  assert.equal(out.leady[0].data_zgloszenia, '2026-10-05 11:00');
+  assert.equal(out.historia[0].kto, 'AI z maila, zatwierdziła Ania');
+});
+test('n8n/dist: "Przetwórz skrzynkę" (F) – szablon zakładki daje ✅, ⚠ ponowienie i ❌', () => {
+  const code = readFileSync('n8n/dist/F-skrzynka.js', 'utf8');
+  const wpisy = parseCsv(readFileSync('data/wpisz-lead-szablon.csv', 'utf8')).map((r, i) => ({ ...r, row_number: i + 2 }));
+  const nodes = { Konfiguracja: [cfgWa], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy };
+  const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+  const out = new Function('$', code)($)[0].json;
+  assert.deepEqual(out.wyniki.map((w) => w.wynik.slice(0, 1)), ['✅', '⚠', '❌']);
+  assert.match(out.wyniki[0].wynik, /Ewa Sowa \(pomorskie\)/); // Słupsk -> pomorskie z miasta
+  assert.match(out.wyniki[1].wynik, /ponowienie L-031/);
+});

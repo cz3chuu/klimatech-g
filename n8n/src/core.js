@@ -458,11 +458,18 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
   return { row, dup };
 }
 
+// Data faktycznego kontaktu (np. telefon o 9:10 wpisany o 11:00) – zegar SLA liczy się od niej; przyszłe daty ignorujemy
+function dataKontaktu(inp, now) {
+  const d = String(inp.data_kontaktu || '').trim();
+  return parseLocal(d) && d.slice(0, 16) <= now ? d.slice(0, 16) : now;
+}
+
 function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   const errors = validateInput(inp);
   if (errors.length) return { valid: false, errors, response: { ok: false, errors } };
 
-  const { row, dup } = buildLeadRow(inp, existing, handlowcyRows, now);
+  const { row, dup } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now) });
+  const wprowadzil = String(inp.wprowadzil || '').trim() || (row.zrodlo === 'formularz' ? 'formularz WWW' : 'Ania (biuro)');
   const original = dup && dup.original;
   const pewny = dup && dup.typ === 'pewny' && original;
   const oryginalZamkniety = pewny && STATUSY_ZAMYKAJACE_SLA.includes(original.status);
@@ -525,7 +532,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
     : null;
 
   const historia = [
-    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: row.zrodlo === 'formularz' ? 'formularz WWW' : 'Ania (biuro)', szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})` },
+    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: wprowadzil, szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})${row.data_zgloszenia !== now ? `; kontakt klienta: ${row.data_zgloszenia}` : ''}` },
   ];
   if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', kto: 'system', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
   historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
@@ -550,6 +557,40 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
       sla_start: slaStart(row.data_zgloszenia),
     },
   };
+}
+
+// ---------------- Skrzynka „Wpisz lead” (workflow F) ----------------
+// Wspólne wejście dla wszystkiego spoza formularza: telefony i maile wpisywane przez Anię, w przyszłości AI z maili.
+// Wiersz czeka, dopóki kolumna „akcja” = SPRAWDŹ (np. propozycja AI) – Ania zmienia ją na OK albo czyści.
+const SKRZYNKA_POLA = ['zrodlo', 'firma', 'osoba', 'telefon', 'email', 'miasto', 'wojewodztwo', 'zainteresowanie', 'szac_wartosc_pln', 'wiadomosc', 'data_kontaktu', 'wprowadzil'];
+function doPrzetworzenia(r) {
+  const akcja = String(r.akcja || '').trim().toLowerCase();
+  const pusty = !SKRZYNKA_POLA.some((k) => String(r[k] ?? '').trim());
+  return !pusty && !String(r.wynik || '').trim() && (!akcja || akcja === 'ok');
+}
+function processInbox(wpisy, existing, handlowcyRows, cfg, now) {
+  const baza = [...existing];
+  const out = { wyniki: [], leady: [], historia: [], emaile: [], whatsapp: [] };
+  for (const w of wpisy.filter(doPrzetworzenia)) {
+    const inp = {};
+    SKRZYNKA_POLA.forEach((k) => { inp[k] = w[k]; });
+    inp.zrodlo = String(inp.zrodlo || '').trim() || 'telefon';
+    const r = processInquiry(inp, baza, handlowcyRows, cfg, now);
+    if (!r.valid) {
+      out.wyniki.push({ row_number: w.row_number, wynik: `❌ ${r.errors.join(' ')} Popraw wiersz i wyczyść tę kolumnę.`, lead_id: '' });
+      continue;
+    }
+    baza.push(r.row); // kolejne wiersze z tej samej paczki widzą ten lead (duplikaty między wierszami)
+    out.leady.push(r.row);
+    out.historia.push(...r.historia);
+    out.emaile.push(r.email);
+    if (r.whatsapp) out.whatsapp.push(r.whatsapp);
+    const d = r.response.duplikat;
+    const opis = d && d.typ === 'pewny' ? `⚠ ${r.row.lead_id} – ponowienie ${d.lead_id} → ${r.response.przypisano}`
+      : `✅ ${r.row.lead_id} → ${r.response.przypisano}${r.row.wojewodztwo ? ` (${r.row.wojewodztwo})` : ''}${d ? ` · możliwy duplikat ${d.lead_id}` : ''}`;
+    out.wyniki.push({ row_number: w.row_number, wynik: `${opis} · ${now}`, lead_id: r.row.lead_id });
+  }
+  return out;
 }
 
 // ---------------- Kliknięcie statusu (workflow B) ----------------
@@ -653,6 +694,6 @@ if (typeof module !== 'undefined') {
     parseLocal, formatLocal, nowWarsaw, holidays, isBusinessTime, businessMinutes, slaStart, slaLevel,
     normalizePhone, normalizeEmail, companyKey, normalizeWojewodztwo, findDuplicate, parseHandlowcy, route,
     buildLeadRow, processInquiry, applyStatusClick, checkSla, groupSlaEmails, makeToken,
-    waChatId, parseWaReply, applyStatus, processWaReplies, groupSlaWhatsapp,
+    waChatId, parseWaReply, applyStatus, processWaReplies, groupSlaWhatsapp, processInbox, doPrzetworzenia,
   };
 }

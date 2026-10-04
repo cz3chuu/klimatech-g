@@ -690,14 +690,12 @@ function groupSlaWhatsapp(items, cfg) {
   }).filter(Boolean);
 }
 
-// === Węzeł Code: "Historia SLA" (workflow C, tryb: Run Once for All Items) ===
-const opis = { 1: 'przypomnienie 4h', 2: 'po SLA (1 dzień)', 3: 'eskalacja do Marka (2 dni)' };
-return $('Sprawdź SLA').all().map((i) => ({
-  json: {
-    czas: i.json.aktualizacja,
-    lead_id: i.json.lead_id,
-    zdarzenie: 'sla',
-    kto: 'system',
-    szczegoly: `${opis[i.json.sla_poziom]}; czeka ${i.json._sla.minuty} min roboczych; powiadomienie do ${i.json._sla.do.nazwa}`,
-  },
-}));
+// === Węzeł Code: "Przetwórz skrzynkę" (workflow F, tryb: Run Once for All Items) ===
+// Zakładka „Wpisz lead”: wiersze bez wyniku -> ten sam rdzeń co formularz. Brak nowych wierszy = koniec przebiegu.
+const cfg = $('Konfiguracja').first().json;
+const wpisy = $('Pobierz skrzynkę').all().map((i) => i.json);
+const existing = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
+const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);
+
+const wynik = processInbox(wpisy, existing, handlowcy, cfg, nowWarsaw());
+return wynik.wyniki.length ? [{ json: wynik }] : [];
