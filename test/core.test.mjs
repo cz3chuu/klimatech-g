@@ -279,17 +279,7 @@ test('n8n/dist: "Obsłuż" (obsługa co minutę) – skrzynka, odpowiedź WhatsA
   const out2 = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' });
   assert.ok(out2.length === 0 || (out2[0].json.wyniki.length === 0 && !out2[0].json.aktualizacje.some((u) => u.notatka)));
 });
-test('G: strona po wysłaniu formularza biura – podsumowanie, ostrzeżenie o duplikacie, błędy', () => {
-  const ok = core.processInquiry({ firma: 'Termex', telefon: '629 707 505', miasto: 'Płock' }, rows, handlowcy, cfgWa, '2026-10-05 11:00');
-  const html = core.biuroPage(ok, '/form/biuro');
-  assert.match(html, /✅ L-041 przekazany: Tomasz Wrona/);
-  assert.match(html, /już pisał: <b>L-031<\/b>/);
-  assert.match(html, /ustalone z miasta/);
-  const zle = core.biuroPage(core.processInquiry({ firma: 'X', telefon: '600 12' }, rows, handlowcy, cfgWa, 'x'), '/form/biuro');
-  assert.match(zle, /❌ Lead nie został zapisany/);
-  assert.match(zle, /jest niepełny lub błędny/);
-});
-test('H: formularz klienta – podziękowanie z numerem, po godzinach termin, powtórka bez drugiego leada', () => {
+test('Formularz klienta – podziękowanie z numerem, po godzinach termin, powtórka bez drugiego leada', () => {
   const inp = { firma: 'Nowa', osoba: 'Jan Nowak', telefon: '700 600 500', miasto: 'Gdańsk', wojewodztwo: 'pomorskie', zgoda: true };
   const r1 = core.processInquiry(inp, rows, handlowcy, cfgWa, '2026-10-05 10:00');
   const html = core.klientPage(r1, '/form/klimatech');

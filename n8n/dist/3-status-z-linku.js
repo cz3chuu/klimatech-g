@@ -652,34 +652,6 @@ function klientPage(wynik, formUrl) {
 <p style="padding:10px 12px;background:#fff;border-radius:8px;font-size:14px">Numer się nie zgadza? Wyślij formularz jeszcze raz z poprawnym numerem – przekażemy go doradcy razem z tym zgłoszeniem.</p>${ponownie}</div>`;
 }
 
-// Strona po wysłaniu „Formularza biura” (workflow G): co zapisano i komu przydzielono – tu Ania wyłapuje literówki
-function biuroPage(wynik, formUrl) {
-  const box = (kolor, tlo, tresc) => `<div style="font-family:Arial,sans-serif;max-width:560px;margin:24px auto;padding:24px;border-radius:12px;background:${tlo};color:#142029">${tresc}</div>`;
-  const nowy = `<p style="margin-top:20px"><a href="${esc(formUrl)}" style="display:inline-block;padding:10px 16px;background:#0e5c88;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold">Wpisz kolejny lead</a></p>`;
-  if (!wynik.valid) {
-    return box('#b42318', '#fae5e2', `<h2 style="margin:0 0 8px;color:#b42318">❌ Lead nie został zapisany</h2>
-<ul>${wynik.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
-<p>Nic nie trafiło do handlowców.</p>${nowy.replace('Wpisz kolejny lead', 'Wpisz ponownie')}`);
-  }
-  const r = wynik.row, o = wynik.response, d = o.duplikat;
-  const woj = r.wojewodztwo ? `${esc(r.wojewodztwo)}${r.wojewodztwo_zrodlo === 'miasto' ? ' <i>(ustalone z miasta – sprawdź)</i>' : ''}` : '<b style="color:#b45309">nieustalone – lead czeka na przypisanie</b>';
-  const wiersze = [
-    ['Firma / osoba', esc(`${r.firma}${r.firma && r.osoba ? ' – ' : ''}${r.osoba}`)],
-    ['Telefon', r.telefon_norm ? `<b>${esc(formatPhone(r.telefon_norm))}</b>` : '—'],
-    ['E-mail', esc(r.email || '—')],
-    ['Miasto / województwo', `${esc(r.miasto || '—')} / ${woj}`],
-    ['Zainteresowanie', `${esc(r.zainteresowanie || '—')} · ${zl(r.szac_wartosc_pln)}`],
-    ['Kontakt klienta', esc(r.data_zgloszenia)],
-    ['Zegar SLA od', esc(o.sla_start)],
-  ];
-  const ostrzezenie = d ? `<p style="padding:10px 12px;background:#fbefdc;border-radius:8px;margin:12px 0">⚠ ${d.typ === 'pewny'
-    ? `Ten klient już pisał: <b>${esc(d.lead_id)}</b> (zgodny ${esc(d.powod)}). Handlowiec dostał to jako ponowienie.`
-    : `Możliwy duplikat <b>${esc(d.lead_id)}</b> (ta sama ${esc(d.powod)}). Sprawdź, czy to ta sama firma.`}</p>` : '';
-  return box('#17803d', '#e3f3e8', `<h2 style="margin:0 0 4px;color:#17803d">✅ ${esc(r.lead_id)} przekazany: ${esc(o.przypisano)}</h2>
-<p style="margin:0 0 12px;color:#5d6a76">Sprawdź dane – jeśli widzisz literówkę w numerze, popraw ją w arkuszu (zakładka Leady) i daj znać handlowcowi.</p>${ostrzezenie}
-<table style="border-collapse:collapse;font-size:14px;width:100%">${wiersze.map(([k, v]) => `<tr><td style="padding:5px 12px 5px 0;color:#5d6a76;white-space:nowrap">${k}</td><td style="padding:5px 0">${v}</td></tr>`).join('')}</table>${nowy}`);
-}
-
 // ---------------- Kliknięcie statusu (workflow B) ----------------
 
 function applyStatusClick(query, rows, now) {

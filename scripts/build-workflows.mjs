@@ -1,5 +1,6 @@
 // Generuje gotowe do importu workflow n8n z kodem z n8n/dist/. Cztery workflow, każdy z jednym zadaniem:
-//   1. Przyjęcie leada      – webhook strony WWW, formularz klienta, formularz biura -> rdzeń -> arkusz -> WhatsApp/mail
+//   1. Przyjęcie leada      – webhook strony WWW i formularz klienta -> rdzeń -> arkusz -> WhatsApp/mail
+//      (wpisy biura: zakładka „Wpisz lead”, obsługiwana w 2.; n8n nie pozwala na dwa formularze n8n w jednej ścieżce)
 //   2. Obsługa co minutę    – skrzynka „Wpisz lead”, odpowiedzi z WhatsAppa, SLA i eskalacje (co 15 min)
 //   3. Status z linku       – klik w przycisk w mailu (Marek, Ania)
 //   4. Synchronizacja z CRM – arkusz -> Supabase (osobno: awaria CRM nie zatrzymuje leadów)
@@ -33,7 +34,7 @@ const PRZYKLAD = {
 };
 
 // Węzeł „Zgłoszenie”: ujednolica trzy wejścia do jednego kształtu danych i zapisuje, skąd przyszło (_wejscie)
-const ZGLOSZENIE = `// Webhook strony (JSON w body) | formularz klienta | formularz biura (etykiety pól) -> jeden kształt danych
+const ZGLOSZENIE = `// Webhook strony (JSON w body) | formularz klienta (etykiety pól) -> jeden kształt danych
 const j = $input.first().json;
 if (j.body && typeof j.body === 'object') return [{ json: { ...j.body, _wejscie: 'webhook' } }];
 if (typeof j.body === 'string') { try { return [{ json: { ...JSON.parse(j.body), _wejscie: 'webhook' } }]; } catch (e) { return [{ json: { _wejscie: 'webhook' } }]; } }
@@ -41,11 +42,8 @@ const POLA = {
   'Firma': 'firma', 'E-mail': 'email', 'Telefon': 'telefon', 'Miasto': 'miasto', 'Województwo': 'wojewodztwo', 'Wiadomość': 'wiadomosc',
   // formularz klienta
   'Imię i nazwisko': 'osoba', 'Czym jesteś zainteresowany?': 'zainteresowanie', 'Orientacyjna wartość zamówienia (zł)': 'szac_wartosc_pln', 'Zgoda': 'zgoda',
-  // formularz biura
-  'Źródło': 'zrodlo', 'Osoba kontaktowa': 'osoba', 'Zainteresowanie': 'zainteresowanie', 'Szacowana wartość (zł)': 'szac_wartosc_pln',
-  'Treść zapytania / notatka z rozmowy': 'wiadomosc', 'Kto wpisuje': 'wprowadzil',
 };
-const out = { _wejscie: j['Kto wpisuje'] ? 'biuro' : 'klient' };
+const out = { _wejscie: 'klient' };
 for (const [etykieta, pole] of Object.entries(POLA)) if (j[etykieta] !== undefined && j[etykieta] !== '') out[pole] = j[etykieta];
 if (['(nie wiem)', '(ustal z miasta)'].includes(out.wojewodztwo)) delete out.wojewodztwo;
 // pola wielokrotnego wyboru przychodzą jako lista
@@ -53,9 +51,6 @@ if (Array.isArray(out.zainteresowanie)) out.zainteresowanie = out.zainteresowani
 if (Array.isArray(out.zgoda)) out.zgoda = out.zgoda.length > 0;
 const kim = [].concat(j['Kim jesteś?'] || []).join(', ');
 if (kim) out.wiadomosc = '[' + kim + '] ' + (out.wiadomosc || '');
-// data + godzina kontaktu z formularza biura -> "YYYY-MM-DD HH:mm" (puste = teraz)
-const dk = String(j['Data kontaktu'] || '').slice(0, 10), gk = String(j['Godzina kontaktu'] || '').trim();
-if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dk)) out.data_kontaktu = dk + ' ' + (/^[0-9]{1,2}:[0-9]{2}$/.test(gk) ? gk.padStart(5, '0') : '08:00');
 return [{ json: out }];`;
 
 const WOJ = ['dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
@@ -104,7 +99,7 @@ function build(c) {
     assignments: {
       assignments: [
         ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX], ['TRYB_TESTOWY', c.TRYB_TESTOWY],
-        ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`],
+        ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
         ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
         ['SUPABASE_URL', c.SUPABASE_URL], ...extraFields,
@@ -135,13 +130,13 @@ function build(c) {
   ];
 
   // ======================================================================
-  // 1. PRZYJĘCIE LEADA – trzy wejścia, jeden rdzeń, odpowiedź zależna od wejścia
+  // 1. PRZYJĘCIE LEADA – dwa wejścia, jeden rdzeń, odpowiedź zależna od wejścia
   // ======================================================================
   const PL = "$('Przetwórz lead').first().json";
   const W1 = wf('KlimatechWfA0001', 'Klimatech 1 – Przyjęcie leada', [
     // Produkcja: wtyczka formularza WordPress wysyła JSON na /webhook/lead
     node('Webhook strony WWW', 'n8n-nodes-base.webhook', 2, [0, -220], {
-      httpMethod: 'POST', path: 'lead', responseMode: 'responseNode', options: { allowedOrigins: '*' },
+      httpMethod: 'POST', path: 'lead', responseMode: 'lastNode', responseData: 'firstEntryJson', options: { allowedOrigins: '*' },
     }, { webhookId: uid('e0e0e0e0') }),
     // Makieta formularza ze strony – dla klientów
     node('Formularz klienta', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
@@ -165,30 +160,6 @@ function build(c) {
       responseMode: 'lastNode',
       options: { appendAttribution: false, buttonLabel: 'Wyślij zapytanie', path: 'klimatech' },
     }, { webhookId: uid('f0f0f0f0') }),
-    // Propozycja dla biura – alternatywa dla wpisywania w arkusz
-    node('Formularz biura', 'n8n-nodes-base.formTrigger', 2.2, [0, 220], {
-      formTitle: 'Klimatech – wpisz lead (biuro)',
-      formDescription: 'Dla zapytań z telefonu, maila, targów i poleceń. Lead trafi do handlowca z województwa tak samo jak z formularza na stronie. Podaj telefon albo e-mail.',
-      formFields: {
-        values: [
-          { fieldLabel: 'Źródło', fieldType: 'dropdown', fieldOptions: opcje(['telefon', 'mail', 'targi', 'polecenie', 'inne']), requiredField: true },
-          { fieldLabel: 'Firma' },
-          { fieldLabel: 'Osoba kontaktowa' },
-          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333 – dowolny format' },
-          { fieldLabel: 'E-mail', fieldType: 'email' },
-          { fieldLabel: 'Miasto' },
-          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(['(ustal z miasta)', ...WOJ]) },
-          { fieldLabel: 'Zainteresowanie', fieldType: 'dropdown', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja', 'inne']), requiredField: true },
-          { fieldLabel: 'Szacowana wartość (zł)', fieldType: 'number' },
-          { fieldLabel: 'Treść zapytania / notatka z rozmowy', fieldType: 'textarea' },
-          { fieldLabel: 'Data kontaktu', fieldType: 'date' },
-          { fieldLabel: 'Godzina kontaktu', placeholder: 'np. 09:10 – puste pola daty i godziny = teraz' },
-          { fieldLabel: 'Kto wpisuje', fieldType: 'dropdown', fieldOptions: opcje(['Ania (biuro)', 'Marek', 'inna osoba']), requiredField: true },
-        ],
-      },
-      responseMode: 'lastNode',
-      options: { appendAttribution: false, buttonLabel: 'Zapisz i przekaż handlowcowi', path: 'biuro' },
-    }, { webhookId: uid('b10b10b1') }),
     code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
     konfiguracja([X(2), 0]),
     getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
@@ -206,13 +177,12 @@ function build(c) {
     // Odpowiedź: formularze -> strona wyniku; webhook -> JSON (200 / 400)
     ifOnce('Z formularza?', [X(15), 0], `={{ ${PL}.wejscie !== 'webhook' }}`),
     node('Strona wyniku', 'n8n-nodes-base.form', 1, [X(16), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
-    node('Odpowiedź JSON', 'n8n-nodes-base.respondToWebhook', 1.1, [X(16), 100], {
-      respondWith: 'json', responseBody: `={{ JSON.stringify(${PL}.response) }}`, options: { responseCode: `={{ ${PL}.valid ? 200 : 400 }}` },
-    }),
+    // n8n nie pozwala na „Respond to Webhook” obok formularza n8n -> webhook odsyła wynik ostatniego węzła (ten JSON).
+    // Kod HTTP zawsze 200; o powodzeniu mówi pole ok (true/false) i lista errors.
+    code('Odpowiedź JSON', [X(16), 100], `return [{ json: ${PL}.response }];`),
   ], {
     'Webhook strony WWW': { main: [[to('Zgłoszenie')]] },
     'Formularz klienta': { main: [[to('Zgłoszenie')]] },
-    'Formularz biura': { main: [[to('Zgłoszenie')]] },
     ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Nowy i poprawny?'),
     // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, od razu odpowiedź
     'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Z formularza?')]] },
