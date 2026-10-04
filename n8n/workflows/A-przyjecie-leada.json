@@ -188,7 +188,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000019",
+      "id": "a1b2c3d4-0000-4000-8000-000000000020",
       "name": "Konfiguracja",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -278,6 +278,12 @@
               "name": "GREEN_PHONE",
               "value": "",
               "type": "string"
+            },
+            {
+              "id": "5e7f1e1d-0000-4000-8000-000000000019",
+              "name": "SUPABASE_URL",
+              "value": "https://TWOJ-PROJEKT.supabase.co",
+              "type": "string"
             }
           ]
         },
@@ -285,7 +291,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000020",
+      "id": "a1b2c3d4-0000-4000-8000-000000000021",
       "name": "Pobierz handlowców",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -313,7 +319,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000021",
+      "id": "a1b2c3d4-0000-4000-8000-000000000022",
       "name": "Pobierz leady",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -341,7 +347,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000022",
+      "id": "a1b2c3d4-0000-4000-8000-000000000023",
       "name": "Przetwórz lead",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -354,7 +360,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000024",
+      "id": "a1b2c3d4-0000-4000-8000-000000000025",
       "name": "Czy poprawny?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -372,7 +378,7 @@
           },
           "conditions": [
             {
-              "id": "c0ffee00-0000-4000-8000-000000000023",
+              "id": "c0ffee00-0000-4000-8000-000000000024",
               "leftValue": "={{ $json.valid }}",
               "rightValue": "",
               "operator": {
@@ -388,7 +394,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000025",
+      "id": "a1b2c3d4-0000-4000-8000-000000000026",
       "name": "Wiersz do zapisu",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -401,7 +407,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000026",
+      "id": "a1b2c3d4-0000-4000-8000-000000000027",
       "name": "Zapisz lead",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -437,7 +443,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000027",
+      "id": "a1b2c3d4-0000-4000-8000-000000000028",
       "name": "Historia",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -450,7 +456,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000028",
+      "id": "a1b2c3d4-0000-4000-8000-000000000029",
       "name": "Zapisz historię",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -486,7 +492,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000030",
+      "id": "a1b2c3d4-0000-4000-8000-000000000031",
       "name": "Mail?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -504,7 +510,7 @@
           },
           "conditions": [
             {
-              "id": "c0ffee00-0000-4000-8000-000000000029",
+              "id": "c0ffee00-0000-4000-8000-000000000030",
               "leftValue": "={{ $('Konfiguracja').first().json.KANAL !== 'whatsapp' }}",
               "rightValue": "",
               "operator": {
@@ -521,7 +527,7 @@
       "executeOnce": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000031",
+      "id": "a1b2c3d4-0000-4000-8000-000000000032",
       "name": "Wyślij mail",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
@@ -544,7 +550,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000033",
+      "id": "a1b2c3d4-0000-4000-8000-000000000034",
       "name": "WhatsApp?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -562,7 +568,7 @@
           },
           "conditions": [
             {
-              "id": "c0ffee00-0000-4000-8000-000000000032",
+              "id": "c0ffee00-0000-4000-8000-000000000033",
               "leftValue": "={{ !!$('Przetwórz lead').first().json.whatsapp }}",
               "rightValue": "",
               "operator": {
@@ -579,7 +585,7 @@
       "executeOnce": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000034",
+      "id": "a1b2c3d4-0000-4000-8000-000000000035",
       "name": "Wyślij WhatsApp",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -599,7 +605,7 @@
       "executeOnce": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000035",
+      "id": "a1b2c3d4-0000-4000-8000-000000000036",
       "name": "Odpowiedź",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -612,7 +618,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000036",
+      "id": "a1b2c3d4-0000-4000-8000-000000000037",
       "name": "Błąd walidacji",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

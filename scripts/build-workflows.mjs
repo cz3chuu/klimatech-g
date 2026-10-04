@@ -1,4 +1,4 @@
-// Generuje gotowe do importu workflow n8n (A, B, C, D) z kodem z n8n/dist/.
+// Generuje gotowe do importu workflow n8n (A, B, C, D, E) z kodem z n8n/dist/.
 // Użycie: node scripts/build-workflows.mjs
 //  - zawsze:                       n8n/workflows/*.json        (szablon do repo, wartości przykładowe)
 //  - jeśli jest n8n/config.local.json: n8n/workflows.local/*.json (Twoje ID arkusza, credentials, adresy) – w .gitignore
@@ -24,6 +24,8 @@ const PRZYKLAD = {
   GREEN_PHONE: '',
   MAREK_WHATSAPP: '',
   ANIA_WHATSAPP: '',
+  SUPABASE_URL: 'https://TWOJ-PROJEKT.supabase.co',
+  SUPABASE_CRED: { id: '', name: 'Supabase – klucz secret' }, // credential typu Custom Auth (nagłówki apikey/Authorization)
 };
 
 // Kod małych węzłów (bez rdzenia)
@@ -49,6 +51,7 @@ function build(c) {
   const uid = (p) => `${p}-0000-4000-8000-${String(++n).padStart(12, '0')}`;
   const sheetsCred = c.SHEETS_CRED.id ? { googleSheetsOAuth2Api: c.SHEETS_CRED } : undefined;
   const gmailCred = c.GMAIL_CRED.id ? { gmailOAuth2: c.GMAIL_CRED } : undefined;
+  const supaCred = c.SUPABASE_CRED.id ? { httpCustomAuth: c.SUPABASE_CRED } : undefined;
 
   const node = (name, type, typeVersion, position, parameters, extra = {}) =>
     ({ id: uid('a1b2c3d4'), name, type, typeVersion, position, parameters, ...extra });
@@ -89,7 +92,7 @@ function build(c) {
         ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX],
         ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
-        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ...extraFields,
+        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
@@ -236,7 +239,31 @@ function build(c) {
     'Potwierdzenia': { main: [[to('Odpisz na WhatsApp')]] },
   });
 
-  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D };
+  // ---------- E. Synchronizacja arkusz -> Supabase (mini CRM) ----------
+  const E = wf('KlimatechWfE0001', 'Klimatech E – Synchronizacja z CRM (co 1 min)', [
+    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
+    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
+    konfiguracja([X(1), 0]),
+    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
+    getRows('Pobierz leady', [X(3), 0], 'Leady'),
+    getRows('Pobierz historię', [X(4), 0], 'Historia'),
+    code('Przygotuj dane', [X(5), 0], dist('E-synchronizacja.js')),
+    node('Zapisz w Supabase', 'n8n-nodes-base.httpRequest', 4.2, [X(6), 0], {
+      method: 'POST',
+      url: `={{ ${K('SUPABASE_URL')} }}/rest/v1/{{ $json.tabela }}?on_conflict={{ $json.on_conflict }}`,
+      authentication: 'genericCredentialType', genericAuthType: 'httpCustomAuth',
+      sendHeaders: true,
+      headerParameters: { parameters: [{ name: 'Prefer', value: '={{ $json.prefer }}' }] },
+      sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.rows) }}',
+      options: {},
+    }, { credentials: supaCred }),
+  ], {
+    'Co minutę': { main: [[to('Konfiguracja')]] },
+    'Test ręczny': { main: [[to('Konfiguracja')]] },
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase'),
+  });
+
+  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E };
 }
 
 function write(dir, cfg) {

@@ -4,7 +4,7 @@
   "active": false,
   "nodes": [
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000049",
+      "id": "a1b2c3d4-0000-4000-8000-000000000050",
       "name": "Co 15 minut",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -24,7 +24,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000050",
+      "id": "a1b2c3d4-0000-4000-8000-000000000051",
       "name": "Test ręczny",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -35,7 +35,7 @@
       "parameters": {}
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000065",
+      "id": "a1b2c3d4-0000-4000-8000-000000000067",
       "name": "Konfiguracja",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
@@ -49,85 +49,91 @@
         "assignments": {
           "assignments": [
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000051",
+              "id": "5e7f1e1d-0000-4000-8000-000000000052",
               "name": "MAREK_EMAIL",
               "value": "marek@klimatech.example",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000052",
+              "id": "5e7f1e1d-0000-4000-8000-000000000053",
               "name": "ANIA_EMAIL",
               "value": "biuro@klimatech.example",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000053",
+              "id": "5e7f1e1d-0000-4000-8000-000000000054",
               "name": "TEST_INBOX",
               "value": "twoj.mail+klimatech@gmail.com",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000054",
+              "id": "5e7f1e1d-0000-4000-8000-000000000055",
               "name": "TRYB_TESTOWY",
               "value": "true",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000055",
+              "id": "5e7f1e1d-0000-4000-8000-000000000056",
               "name": "STATUS_URL",
               "value": "http://localhost:5678/webhook/status",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000056",
+              "id": "5e7f1e1d-0000-4000-8000-000000000057",
               "name": "KANAL",
               "value": "oba",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000057",
+              "id": "5e7f1e1d-0000-4000-8000-000000000058",
               "name": "TEST_WHATSAPP",
               "value": "48600000000",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000058",
+              "id": "5e7f1e1d-0000-4000-8000-000000000059",
               "name": "MAREK_WHATSAPP",
               "value": "",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000059",
+              "id": "5e7f1e1d-0000-4000-8000-000000000060",
               "name": "ANIA_WHATSAPP",
               "value": "",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000060",
+              "id": "5e7f1e1d-0000-4000-8000-000000000061",
               "name": "GREEN_API_URL",
               "value": "https://7107.api.greenapi.com",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000061",
+              "id": "5e7f1e1d-0000-4000-8000-000000000062",
               "name": "GREEN_ID",
               "value": "WKLEJ_ID_INSTANCJI",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000062",
+              "id": "5e7f1e1d-0000-4000-8000-000000000063",
               "name": "GREEN_TOKEN",
               "value": "WKLEJ_TOKEN",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000063",
+              "id": "5e7f1e1d-0000-4000-8000-000000000064",
               "name": "GREEN_PHONE",
               "value": "",
               "type": "string"
             },
             {
-              "id": "5e7f1e1d-0000-4000-8000-000000000064",
+              "id": "5e7f1e1d-0000-4000-8000-000000000065",
+              "name": "SUPABASE_URL",
+              "value": "https://TWOJ-PROJEKT.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "5e7f1e1d-0000-4000-8000-000000000066",
               "name": "TERAZ",
               "value": "",
               "type": "string"
@@ -138,7 +144,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000066",
+      "id": "a1b2c3d4-0000-4000-8000-000000000068",
       "name": "Pobierz handlowców",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -166,7 +172,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000067",
+      "id": "a1b2c3d4-0000-4000-8000-000000000069",
       "name": "Pobierz leady",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -194,7 +200,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000068",
+      "id": "a1b2c3d4-0000-4000-8000-000000000070",
       "name": "Sprawdź SLA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -207,7 +213,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000069",
+      "id": "a1b2c3d4-0000-4000-8000-000000000071",
       "name": "Wiersze SLA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -220,7 +226,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000070",
+      "id": "a1b2c3d4-0000-4000-8000-000000000072",
       "name": "Zapisz poziom SLA",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -258,7 +264,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000071",
+      "id": "a1b2c3d4-0000-4000-8000-000000000073",
       "name": "Historia SLA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -271,7 +277,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000072",
+      "id": "a1b2c3d4-0000-4000-8000-000000000074",
       "name": "Zapisz historię",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -307,7 +313,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000073",
+      "id": "a1b2c3d4-0000-4000-8000-000000000075",
       "name": "Grupuj maile",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -320,7 +326,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000074",
+      "id": "a1b2c3d4-0000-4000-8000-000000000076",
       "name": "Wyślij mail",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
@@ -342,7 +348,7 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000075",
+      "id": "a1b2c3d4-0000-4000-8000-000000000077",
       "name": "Grupuj WhatsApp",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -355,7 +361,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000076",
+      "id": "a1b2c3d4-0000-4000-8000-000000000078",
       "name": "Wyślij WhatsApp",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
