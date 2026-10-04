@@ -101,7 +101,7 @@ Pełna wersja: [docs/propozycja-dla-klienta.md](docs/propozycja-dla-klienta.md).
 
 ## 3. Makieta
 
-Działa lokalnie na moim n8n, z arkuszem Google, Gmailem, WhatsAppem (Green API) i Supabase. Kod i workflow są w repozytorium z pełną historią zmian.
+Działa lokalnie na n8n, z arkuszem Google, Gmailem, WhatsAppem (Green API, usunąłem numer telefonu z uwagi na publiczne repozytorium) i Supabase. Kod i workflow są w repozytorium z pełną historią zmian.
 
 Rdzeń na danych z załącznika: `npm test` uruchamia 32 testy na prawdziwym eksporcie, wszystkie 3 pary duplikatów, przydział, region bez handlowca, województwo z miasta, czas reakcji w godzinach pracy, SLA.
 
