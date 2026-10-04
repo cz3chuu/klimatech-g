@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Klimatech CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Układ: pasek z liczbami na górze, pod nim lista leadów i karta klienta obok (na telefonie karta na pełnym ekranie). */
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --ink: #15202b;
+  --muted: #5b6875;
+  --line: #dde3e9;
+  --accent: #0f5f8c;        /* niebieski chłodu z pompy ciepła */
+  --accent-soft: #e3eff7;
+  --ok: #17803d;  --ok-soft: #e4f4e9;
+  --warn: #b45309; --warn-soft: #fcf0de;
+  --bad: #b42318;  --bad-soft: #fbe6e3;
+  --esc: #7a1414;  --esc-soft: #f6dcdc;
+  --idle: #6b7480; --idle-soft: #eceff2;
+  --plan: #4f46a5; --plan-soft: #ebeafa;
+  --f-display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --f-body: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  --f-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --panel: #161e26; --ink: #e6ecf1; --muted: #93a1ae; --line: #26323d;
+    --accent: #5fb0e3; --accent-soft: #15303f;
+    --ok: #5cc77f; --ok-soft: #14301f; --warn: #f0a24a; --warn-soft: #3a2a14;
+    --bad: #f07a6e; --bad-soft: #3b1c19; --esc: #ff9b9b; --esc-soft: #4a1717;
+    --idle: #9aa5b1; --idle-soft: #222c36; --plan: #a6a0f5; --plan-soft: #26244a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --panel: #161e26; --ink: #e6ecf1; --muted: #93a1ae; --line: #26323d;
+  --accent: #5fb0e3; --accent-soft: #15303f;
+  --ok: #5cc77f; --ok-soft: #14301f; --warn: #f0a24a; --warn-soft: #3a2a14;
+  --bad: #f07a6e; --bad-soft: #3b1c19; --esc: #ff9b9b; --esc-soft: #4a1717;
+  --idle: #9aa5b1; --idle-soft: #222c36; --plan: #a6a0f5; --plan-soft: #26244a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--f-body); padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--f-mono); font-size: .86em; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+
+/* --- nagłówek --- */
+header.top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+.brand { font: 700 20px/1 var(--f-display); letter-spacing: -.01em; display: flex; align-items: baseline; gap: 8px; }
+.brand small { font: 500 12px var(--f-body); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+nav.tabs { display: flex; gap: 4px; }
+nav.tabs button { border: 0; background: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: var(--muted); font-weight: 600; }
+nav.tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.top .spacer { flex: 1; }
+.sync { font-size: 13px; color: var(--muted); }
+.btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+main { padding: 20px; display: grid; gap: 20px; max-width: 1500px; margin: 0 auto; }
+
+/* --- liczby --- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 2px; }
+.kpi b { font: 700 26px/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.kpi span { font-size: 13px; color: var(--muted); }
+.kpi.alert b { color: var(--bad); }
+.kpi.esc b { color: var(--esc); }
+
+/* --- filtry + lista --- */
+.work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 460px); gap: 20px; align-items: start; }
+.work.no-detail { grid-template-columns: minmax(0, 1fr); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); min-width: 0; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); align-items: center; }
+.filters input[type="search"] { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.filters select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); max-width: 100%; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); white-space: nowrap; }
+.count { padding: 8px 12px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--accent-soft); }
+tbody tr.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+td.firma b { display: block; }
+td.firma small { color: var(--muted); }
+.note-snip { color: var(--muted); font-size: 13px; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.s-nowy { background: var(--accent-soft); color: var(--accent); }
+.s-nie_odebral { background: var(--warn-soft); color: var(--warn); }
+.s-dodzwoniono { background: var(--ok-soft); color: var(--ok); }
+.s-umowione { background: var(--plan-soft); color: var(--plan); }
+.s-niezainteresowany { background: var(--idle-soft); color: var(--idle); }
+.sla-1 { background: var(--warn-soft); color: var(--warn); }
+.sla-2 { background: var(--bad-soft); color: var(--bad); }
+.sla-3 { background: var(--esc-soft); color: var(--esc); }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 600; background: var(--idle-soft); color: var(--idle); margin-left: 4px; }
+.tag.brak { background: var(--bad-soft); color: var(--bad); }
+
+/* --- karta klienta --- */
+aside.detail { position: sticky; top: 76px; max-height: calc(100vh - 96px); overflow: auto; }
+.d-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.d-head h2 { margin: 0; font: 700 22px/1.2 var(--f-display); text-wrap: balance; }
+.d-head .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.d-close { justify-self: end; margin-top: -6px; }
+.d-sec { padding: 14px 18px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.d-sec h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+dl.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: 14px; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.copy { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0 4px; }
+blockquote { margin: 0; padding: 8px 12px; background: var(--bg); border-radius: 8px; font-size: 14px; }
+.notatka { background: var(--plan-soft); color: var(--ink); }
+.zgl { display: grid; gap: 6px; }
+.zgl button { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 8px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.zgl button.cur { border-color: var(--accent); }
+ol.tl { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+ol.tl li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; position: relative; padding-bottom: 12px; }
+ol.tl li::before { content: ''; position: absolute; left: 8px; top: 18px; bottom: 0; width: 2px; background: var(--line); }
+ol.tl li:last-child::before { display: none; }
+.dot { width: 18px; height: 18px; border-radius: 50%; background: var(--idle-soft); border: 2px solid var(--idle); margin-top: 2px; }
+.dot.status { background: var(--ok-soft); border-color: var(--ok); }
+.dot.sla { background: var(--bad-soft); border-color: var(--bad); }
+.dot.utworzono, .dot.import { background: var(--accent-soft); border-color: var(--accent); }
+.dot.duplikat, .dot.mozliwy_duplikat { background: var(--warn-soft); border-color: var(--warn); }
+.tl-meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.tl-meta b { color: var(--ink); font-weight: 600; }
+.tl-txt { font-size: 14px; overflow-wrap: anywhere; }
+
+/* --- handlowcy --- */
+.bar { height: 6px; background: var(--idle-soft); border-radius: 3px; overflow: hidden; min-width: 80px; }
+.bar i { display: block; height: 100%; background: var(--ok); }
+
+/* --- logowanie --- */
+.login { max-width: 380px; margin: 10vh auto; padding: 24px; display: grid; gap: 14px; }
+.login h1 { margin: 0; font: 700 26px/1.2 var(--f-display); }
+.login label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.login input { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.err { color: var(--bad); font-size: 14px; }
+.empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+
+@media (max-width: 980px) {
+  .work { grid-template-columns: minmax(0, 1fr); }
+  aside.detail { position: fixed; inset: 0; max-height: none; z-index: 10; border-radius: 0; padding-top: env(safe-area-inset-top, 0px); }
+  main { padding: 12px; }
+  header.top { padding: 10px 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<section id="ekran-logowania" class="panel login" hidden>
+  <h1>Klimatech CRM</h1>
+  <p class="muted" style="margin:0">Leady, kontakty i historia rozmów. Zaloguj się kontem nadanym w Supabase.</p>
+  <form id="form-logowania" novalidate>
+    <div style="display:grid;gap:12px">
+      <label for="email">E-mail<input id="email" type="email" autocomplete="username" required></label>
+      <label for="haslo">Hasło<input id="haslo" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit" id="zaloguj">Zaloguj</button>
+      <div class="err" id="blad-logowania" role="alert"></div>
+    </div>
+  </form>
+</section>
+
+<section id="brak-konfiguracji" class="panel login" hidden>
+  <h1>Brak konfiguracji</h1>
+  <p class="muted">Dopisz <span class="mono">SUPABASE_URL</span> i <span class="mono">SUPABASE_PUBLIC_KEY</span> do <span class="mono">n8n/config.local.json</span> i uruchom ponownie <span class="mono">npm run crm</span>.</p>
+</section>
+
+<div id="aplikacja" hidden>
+  <header class="top">
+    <div class="brand">Klimatech <small>CRM leadów</small></div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tab-leady" aria-selected="true">Leady</button>
+      <button role="tab" id="tab-handlowcy" aria-selected="false">Handlowcy</button>
+    </nav>
+    <div class="spacer"></div>
+    <span class="sync" id="sync"></span>
+    <button class="btn" id="odswiez" type="button">Odśwież</button>
+    <button class="btn" id="wyloguj" type="button">Wyloguj</button>
+  </header>
+
+  <main>
+    <section class="kpis" id="kpis" aria-label="Podsumowanie"></section>
+
+    <section id="widok-leady" class="work no-detail">
+      <div class="panel">
+        <div class="filters">
+          <input type="search" id="szukaj" placeholder="Szukaj: firma, osoba, telefon, L-007…" aria-label="Szukaj">
+          <select id="f-status" aria-label="Status">
+            <option value="">Każdy status</option>
+            <option value="nowy">Nowy</option><option value="nie_odebral">Nie odebrał</option>
+            <option value="dodzwoniono">Dodzwoniono się</option><option value="umowione">Umówione spotkanie</option>
+            <option value="niezainteresowany">Niezainteresowany</option>
+          </select>
+          <select id="f-opiekun" aria-label="Opiekun"><option value="">Każdy opiekun</option></select>
+          <label class="chk" for="f-czeka"><input type="checkbox" id="f-czeka"> tylko bez kontaktu</label>
+          <label class="chk" for="f-dup"><input type="checkbox" id="f-dup"> pokaż ponowienia</label>
+        </div>
+        <div class="count" id="licznik"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Lead</th><th>Klient</th><th>Region / opiekun</th><th>Wartość</th><th>Status</th><th>Czas</th><th>Ostatnia notatka</th></tr></thead>
+            <tbody id="lista"></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="panel detail" id="karta" hidden aria-label="Karta klienta"></aside>
+    </section>
+
+    <section id="widok-handlowcy" class="panel" hidden>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Opiekun</th><th>Województwa</th><th>Zapytań</th><th>Z kontaktem</th><th>Mediana reakcji</th><th>Czeka</th><th>Po SLA (&gt; 1 dzień)</th><th>Wartość czekających</th></tr></thead>
+          <tbody id="handlowcy"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/config.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const cfg = window.CRM_CONFIG || {};
+const STATUS = { nowy: 'Nowy', nie_odebral: 'Nie odebrał', dodzwoniono: 'Dodzwoniono się', umowione: 'Umówione spotkanie', niezainteresowany: 'Niezainteresowany' };
+const ZAMYKA = ['dodzwoniono', 'umowione', 'niezainteresowany'];
+const ZDARZENIA = { import: 'Import z arkusza biura', utworzono: 'Nowe zgłoszenie', duplikat: 'Ponowienie (ten sam klient)', mozliwy_duplikat: 'Możliwy duplikat', przypisano: 'Przypisanie', powiadomienie: 'Powiadomienie', status: 'Kontakt / status', sla: 'Przekroczony czas reakcji' };
+let db = null, dane = { leady: [], historia: [], handlowcy: [] }, wybrany = null, timer = null;
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const zl = (v) => (Number(v) ? Number(v).toLocaleString('pl-PL') + ' zł' : '—');
+const dt = (s) => (s ? String(s).replace('T', ' ').slice(0, 16) : '—');
+const godz = (m) => { if (m == null) return '—'; const h = Math.floor(m / 60), r = m % 60; return h ? `${h} h ${r} min` : `${r} min`; };
+const tel = (n) => (n ? n.replace(/^\+48(\d{3})(\d{3})(\d{3})$/, '+48 $1 $2 $3') : '');
+const slaPoziom = (l) => (ZAMYKA.includes(l.status) || l.czeka_min == null ? 0 : [240, 480, 960].filter((p) => l.czeka_min >= p).length);
+const opiekun = (l) => l.handlowiec || (l.routing === 'bez_opiekuna' ? 'Marek (brak handlowca)' : l.routing === 'do_ustalenia' ? 'Ania – do przypisania' : '—');
+const mediana = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y), k = s.length >> 1; return s.length % 2 ? s[k] : Math.round((s[k - 1] + s[k]) / 2); };
+const pill = (s) => `<span class="pill s-${esc(s)}">${esc(STATUS[s] || s || '—')}</span>`;
+const slaPill = (p) => (p ? `<span class="pill sla-${p}">${['', '> 4 h', 'po SLA', 'eskalacja'][p]}</span>` : '');
+
+// ---------- start ----------
+if (!cfg.url || !cfg.key || !window.supabase) { $('brak-konfiguracji').hidden = false; }
+else {
+  db = window.supabase.createClient(cfg.url, cfg.key);
+  db.auth.getSession().then(({ data }) => (data.session ? start() : pokazLogowanie()));
+}
+function pokazLogowanie() { $('aplikacja').hidden = true; $('ekran-logowania').hidden = false; $('email').focus(); }
+$('form-logowania').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('blad-logowania').textContent = ''; $('zaloguj').disabled = true;
+  const { error } = await db.auth.signInWithPassword({ email: $('email').value.trim(), password: $('haslo').value });
+  $('zaloguj').disabled = false;
+  if (error) { $('blad-logowania').textContent = 'Nie udało się zalogować: sprawdź e-mail i hasło (konto zakłada się w Supabase → Authentication).'; return; }
+  $('haslo').value = ''; start();
+});
+$('wyloguj').addEventListener('click', async () => { clearInterval(timer); await db.auth.signOut(); pokazLogowanie(); });
+$('odswiez').addEventListener('click', () => wczytaj());
+
+async function start() {
+  $('ekran-logowania').hidden = true; $('aplikacja').hidden = false;
+  await wczytaj();
+  clearInterval(timer); timer = setInterval(wczytaj, 30000);
+}
+
+async function wczytaj() {
+  $('sync').textContent = 'Wczytywanie…';
+  const [l, h, hd] = await Promise.all([
+    db.from('leady').select('*').order('data_zgloszenia', { ascending: false }),
+    db.from('historia').select('*').order('czas', { ascending: true }),
+    db.from('handlowcy').select('*').order('handlowiec_id'),
+  ]);
+  const blad = l.error || h.error || hd.error;
+  if (blad) { $('sync').textContent = 'Błąd wczytywania: ' + blad.message; return; }
+  dane = { leady: l.data, historia: h.data, handlowcy: hd.data };
+  const ost = dane.leady.map((x) => x.zsynchronizowano).filter(Boolean).sort().pop();
+  $('sync').textContent = ost ? `dane z arkusza: ${dt(ost)}` : 'brak danych – uruchom synchronizację (n8n E)';
+  wypelnijOpiekunow(); rysuj();
+}
+
+// ---------- widoki ----------
+function unikalne() { return dane.leady.filter((l) => l.duplikat_typ !== 'pewny'); }
+function rysuj() { rysujKpi(); rysujListe(); rysujHandlowcow(); if (wybrany) rysujKarte(wybrany); }
+
+function rysujKpi() {
+  const u = unikalne(), bez = u.filter((l) => !l.pierwszy_kontakt);
+  const reakcje = u.map((l) => l.czas_reakcji_min).filter((m) => m != null);
+  const poSla = bez.filter((l) => slaPoziom(l) >= 2).length, eskal = bez.filter((l) => slaPoziom(l) >= 3).length;
+  const kafle = [
+    ['Zapytań (bez ponowień)', u.length, ''],
+    ['Czeka na pierwszy telefon', bez.length, ''],
+    ['Wartość czekających', zl(bez.reduce((s, l) => s + Number(l.szac_wartosc_pln || 0), 0)), ''],
+    ['Po SLA (> 1 dzień rob.)', poSla, poSla ? 'alert' : ''],
+    ['Eskalacje (> 2 dni rob.)', eskal, eskal ? 'esc' : ''],
+    ['Mediana czasu reakcji', godz(mediana(reakcje)), ''],
+  ];
+  $('kpis').innerHTML = kafle.map(([t, v, c]) => `<div class="kpi ${c}"><b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('');
+}
+
+function wypelnijOpiekunow() {
+  const sel = $('f-opiekun'), akt = sel.value;
+  const opcje = [...new Set(dane.leady.map(opiekun))].sort();
+  sel.innerHTML = '<option value="">Każdy opiekun</option>' + opcje.map((o) => `<option${o === akt ? ' selected' : ''}>${esc(o)}</option>`).join('');
+}
+
+function rysujListe() {
+  const q = $('szukaj').value.trim().toLowerCase(), st = $('f-status').value, op = $('f-opiekun').value;
+  const ponowienia = {};
+  dane.leady.filter((l) => l.duplikat_typ === 'pewny').forEach((l) => { ponowienia[l.klient_id] = (ponowienia[l.klient_id] || 0) + 1; });
+  const qCyfry = q.replace(/\D/g, '');
+  const lista = dane.leady.filter((l) =>
+    ($('f-dup').checked || l.duplikat_typ !== 'pewny') &&
+    (!st || l.status === st) && (!op || opiekun(l) === op) &&
+    (!$('f-czeka').checked || !l.pierwszy_kontakt) &&
+    (!q || [l.lead_id, l.firma, l.osoba, l.email, l.miasto].some((v) => String(v || '').toLowerCase().includes(q)) || (qCyfry.length >= 3 && String(l.telefon_norm || '').includes(qCyfry))));
+  $('licznik').textContent = `${lista.length} z ${dane.leady.length} wpisów`;
+  if (!lista.length) { $('lista').innerHTML = `<tr><td colspan="7" class="empty">${dane.leady.length ? 'Brak leadów dla tych filtrów.' : 'Brak danych. Włącz w n8n workflow „E – Synchronizacja z CRM”.'}</td></tr>`; return; }
+  $('lista').innerHTML = lista.map((l) => {
+    const p = slaPoziom(l);
+    const czas = l.pierwszy_kontakt ? `<span class="muted">reakcja</span> ${godz(l.czas_reakcji_min)}` : `<span class="muted">czeka</span> ${godz(l.czeka_min)} ${slaPill(p)}`;
+    return `<tr data-id="${esc(l.lead_id)}" class="${wybrany === l.lead_id ? 'sel' : ''}">
+      <td><span class="mono">${esc(l.lead_id)}</span><br><small class="muted num">${dt(l.data_zgloszenia)}</small></td>
+      <td class="firma"><b>${esc(l.firma || l.osoba)}</b><small>${esc(l.osoba || '')}${ponowienia[l.lead_id] ? `<span class="tag">pisał ${ponowienia[l.lead_id] + 1}×</span>` : ''}${l.duplikat_typ === 'pewny' ? `<span class="tag">ponowienie ${esc(l.duplikat_of)}</span>` : ''}</small></td>
+      <td>${esc(l.wojewodztwo || '—')}<br><small class="muted">${esc(opiekun(l))}</small>${l.routing === 'bez_opiekuna' ? '<span class="tag brak">region bez handlowca</span>' : ''}</td>
+      <td class="num">${zl(l.szac_wartosc_pln)}</td>
+      <td>${pill(l.status)}${Number(l.proby) && l.status === 'nie_odebral' ? `<br><small class="muted">${l.proby} prób</small>` : ''}</td>
+      <td class="num">${czas}</td>
+      <td><div class="note-snip">${esc(l.notatka || '')}</div></td></tr>`;
+  }).join('');
+}
+$('lista').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) otworz(tr.dataset.id); });
+['szukaj', 'f-status', 'f-opiekun', 'f-czeka', 'f-dup'].forEach((id) => $(id).addEventListener('input', rysujListe));
+
+function otworz(id) { wybrany = id; $('karta').hidden = false; $('widok-leady').classList.remove('no-detail'); rysujKarte(id); rysujListe(); }
+function zamknij() { wybrany = null; $('karta').hidden = true; $('widok-leady').classList.add('no-detail'); rysujListe(); }
+
+function rysujKarte(id) {
+  const l = dane.leady.find((x) => x.lead_id === id);
+  if (!l) return zamknij();
+  const grupa = dane.leady.filter((x) => x.klient_id === l.klient_id).sort((a, b) => String(a.data_zgloszenia).localeCompare(String(b.data_zgloszenia)));
+  const mozliwe = dane.leady.filter((x) => x.duplikat_typ === 'mozliwy' && (x.duplikat_of === l.klient_id || x.lead_id === l.lead_id));
+  const ids = new Set([...grupa, ...mozliwe].map((x) => x.lead_id));
+  const os = dane.historia.filter((h) => ids.has(h.lead_id));
+  const zgloszenia = [...new Map([...grupa, ...mozliwe].map((x) => [x.lead_id, x])).values()];
+  const glowny = dane.leady.find((x) => x.lead_id === l.klient_id) || l;
+  const p = slaPoziom(glowny);
+  $('karta').innerHTML = `
+    <div class="d-head">
+      <button class="btn d-close" type="button" id="zamknij">Zamknij</button>
+      <div class="row"><span class="mono">${esc(glowny.lead_id)}</span>${pill(glowny.status)}${slaPill(p)}</div>
+      <h2>${esc(l.firma || l.osoba)}</h2>
+      <div class="muted">${esc(l.osoba || '')}${l.miasto ? ' · ' + esc(l.miasto) : ''}${l.wojewodztwo ? ', ' + esc(l.wojewodztwo) : ''}</div>
+    </div>
+    <div class="d-sec">
+      <h3>Kontakt i przydział</h3>
+      <dl class="kv">
+        <dt>Telefon</dt><dd><span class="mono" id="tel-txt">${esc(tel(l.telefon_norm) || l.telefon || '—')}</span>${l.telefon_norm ? ' <button class="copy" type="button" id="kopiuj">kopiuj</button>' : ''}</dd>
+        <dt>E-mail</dt><dd>${esc(l.email || '—')}</dd>
+        <dt>Opiekun</dt><dd>${esc(opiekun(glowny))}</dd>
+        <dt>Zainteresowanie</dt><dd>${esc(l.zainteresowanie || '—')} · ${zl(l.szac_wartosc_pln)}</dd>
+        <dt>Zegar SLA od</dt><dd class="num">${dt(glowny.sla_start)}</dd>
+        <dt>Pierwszy kontakt</dt><dd class="num">${glowny.pierwszy_kontakt ? `${dt(glowny.pierwszy_kontakt)} · po ${godz(glowny.czas_reakcji_min)} rob.` : `brak · czeka ${godz(glowny.czeka_min)} rob.`}</dd>
+        <dt>Próby</dt><dd class="num">${esc(glowny.proby ?? 0)}</dd>
+      </dl>
+    </div>
+    ${glowny.notatka ? `<div class="d-sec"><h3>Ostatnia notatka z rozmowy</h3><blockquote class="notatka">${esc(glowny.notatka)}</blockquote></div>` : ''}
+    <div class="d-sec">
+      <h3>Zgłoszenia tego klienta (${zgloszenia.length})</h3>
+      <div class="zgl">${zgloszenia.map((x) => `
+        <button type="button" data-id="${esc(x.lead_id)}" class="${x.lead_id === id ? 'cur' : ''}">
+          <span><span class="mono">${esc(x.lead_id)}</span> · ${dt(x.data_zgloszenia)} · ${esc(x.zrodlo || '')}${x.duplikat_typ ? ` <span class="tag">${x.duplikat_typ === 'pewny' ? 'ponowienie' : 'możliwy duplikat'}</span>` : ''}</span>
+          <span class="muted">${esc(x.wiadomosc ? x.wiadomosc.slice(0, 60) : '')}</span>
+        </button>`).join('')}</div>
+    </div>
+    <div class="d-sec">
+      <h3>Historia: kto, co i kiedy</h3>
+      ${os.length ? `<ol class="tl">${os.map((h) => `
+        <li><span class="dot ${esc(h.zdarzenie)}"></span><div>
+          <div class="tl-meta"><span class="num">${dt(h.czas)}</span><b>${esc(h.kto || 'system')}</b><span>${esc(ZDARZENIA[h.zdarzenie] || h.zdarzenie)}</span>${ids.size > 1 ? `<span class="mono">${esc(h.lead_id)}</span>` : ''}</div>
+          <div class="tl-txt">${esc((h.szczegoly || '').replace(/; wa:\S+/, ''))}</div></div></li>`).join('')}</ol>` : '<p class="muted" style="margin:0">Brak wpisów.</p>'}
+    </div>
+    <div class="d-sec"><h3>Treść zgłoszenia</h3><blockquote>${esc(l.wiadomosc || '—')}</blockquote></div>`;
+  $('zamknij').addEventListener('click', zamknij);
+  $('karta').querySelectorAll('.zgl button').forEach((b) => b.addEventListener('click', () => otworz(b.dataset.id)));
+  const k = $('kopiuj');
+  if (k) k.addEventListener('click', () => {
+    navigator.clipboard.writeText(l.telefon_norm).then(() => { k.textContent = 'skopiowano'; })
+      .catch(() => { const r = document.createRange(); r.selectNodeContents($('tel-txt')); getSelection().removeAllRanges(); getSelection().addRange(r); });
+  });
+}
+
+function rysujHandlowcow() {
+  const u = unikalne();
+  const grupy = dane.handlowcy.map((h) => ({ nazwa: h.imie_nazwisko, woj: (h.wojewodztwa || '').replace(/;/g, ', '), leady: u.filter((l) => l.handlowiec_id === h.handlowiec_id) }));
+  const bez = u.filter((l) => l.routing === 'bez_opiekuna');
+  if (bez.length) grupy.push({ nazwa: 'Marek (region bez handlowca)', woj: [...new Set(bez.map((l) => l.wojewodztwo))].join(', '), leady: bez, brak: true });
+  const ust = u.filter((l) => l.routing === 'do_ustalenia');
+  if (ust.length) grupy.push({ nazwa: 'Ania – do przypisania', woj: 'brak województwa', leady: ust });
+  $('handlowcy').innerHTML = grupy.map((g) => {
+    const k = g.leady.filter((l) => l.pierwszy_kontakt), cz = g.leady.filter((l) => !l.pierwszy_kontakt);
+    const pct = g.leady.length ? Math.round((k.length / g.leady.length) * 100) : 0;
+    const poSla = cz.filter((l) => slaPoziom(l) >= 2).length;
+    return `<tr><td><b>${esc(g.nazwa)}</b>${g.brak ? '<span class="tag brak">decyzja Marka</span>' : ''}</td><td class="muted">${esc(g.woj)}</td>
+      <td class="num">${g.leady.length}</td>
+      <td><div class="num">${k.length} (${pct}%)</div><div class="bar"><i style="width:${pct}%"></i></div></td>
+      <td class="num">${godz(mediana(k.map((l) => l.czas_reakcji_min).filter((m) => m != null)))}</td>
+      <td class="num">${cz.length}</td><td class="num">${poSla ? `<span class="pill sla-2">${poSla}</span>` : '0'}</td>
+      <td class="num">${zl(cz.reduce((s, l) => s + Number(l.szac_wartosc_pln || 0), 0))}</td></tr>`;
+  }).join('');
+}
+
+// ---------- zakładki ----------
+function zakladka(nazwa) {
+  $('tab-leady').setAttribute('aria-selected', nazwa === 'leady');
+  $('tab-handlowcy').setAttribute('aria-selected', nazwa === 'handlowcy');
+  $('widok-leady').hidden = nazwa !== 'leady';
+  $('widok-handlowcy').hidden = nazwa !== 'handlowcy';
+  try { localStorage.setItem('crm-zakladka', nazwa); } catch (e) {}
+}
+$('tab-leady').addEventListener('click', () => zakladka('leady'));
+$('tab-handlowcy').addEventListener('click', () => zakladka('handlowcy'));
+try { const z = localStorage.getItem('crm-zakladka'); if (z) zakladka(z); } catch (e) {}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wybrany) zamknij(); });
+</script>
+</body>
+</html>
