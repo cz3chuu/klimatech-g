@@ -5,6 +5,7 @@
 // Użycie: node scripts/import-csv.mjs [--now "2026-10-05 08:00"]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const core = require('../n8n/src/core.js');
 
@@ -130,7 +131,7 @@ ${czeka.sort((a, b) => b.min - a.min).slice(0, 10).map(({ r, min }) => `| ${r.le
 }
 
 // ---- uruchomienie z CLI ----
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const i = process.argv.indexOf('--now');
   const now = i > -1 ? process.argv[i + 1] : core.nowWarsaw();
   const leady = parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8'));
