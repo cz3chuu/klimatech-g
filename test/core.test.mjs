@@ -262,3 +262,13 @@ test('n8n/dist: "Przetwórz skrzynkę" (F) – szablon zakładki daje ✅, ⚠ p
   assert.match(out.wyniki[0].wynik, /Ewa Sowa \(pomorskie\)/); // Słupsk -> pomorskie z miasta
   assert.match(out.wyniki[1].wynik, /ponowienie L-031/);
 });
+test('G: strona po wysłaniu formularza biura – podsumowanie, ostrzeżenie o duplikacie, błędy', () => {
+  const ok = core.processInquiry({ firma: 'Termex', telefon: '629 707 505', miasto: 'Płock' }, rows, handlowcy, cfgWa, '2026-10-05 11:00');
+  const html = core.biuroPage(ok, '/form/biuro');
+  assert.match(html, /✅ L-041 przekazany: Tomasz Wrona/);
+  assert.match(html, /już pisał: <b>L-031<\/b>/);
+  assert.match(html, /ustalone z miasta/);
+  const zle = core.biuroPage(core.processInquiry({ firma: 'X', telefon: '600 12' }, rows, handlowcy, cfgWa, 'x'), '/form/biuro');
+  assert.match(zle, /❌ Lead nie został zapisany/);
+  assert.match(zle, /Niepoprawny numer telefonu/);
+});

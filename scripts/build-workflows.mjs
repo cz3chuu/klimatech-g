@@ -1,4 +1,4 @@
-// Generuje gotowe do importu workflow n8n (A, B, C, D, E) z kodem z n8n/dist/.
+// Generuje gotowe do importu workflow n8n (A–G) z kodem z n8n/dist/.
 // Użycie: node scripts/build-workflows.mjs
 //  - zawsze:                       n8n/workflows/*.json        (szablon do repo, wartości przykładowe)
 //  - jeśli jest n8n/config.local.json: n8n/workflows.local/*.json (Twoje ID arkusza, credentials, adresy) – w .gitignore
@@ -25,6 +25,7 @@ const PRZYKLAD = {
   MAREK_WHATSAPP: '',
   ANIA_WHATSAPP: '',
   SUPABASE_URL: 'https://TWOJ-PROJEKT.supabase.co',
+  // adres formularza biura (przycisk „Wpisz kolejny lead”)
   SUPABASE_CRED: { id: '', name: 'Supabase – klucz secret' }, // credential typu Custom Auth (nagłówki apikey/Authorization)
 };
 
@@ -37,10 +38,15 @@ const POLA = {
   'Firma': 'firma', 'Osoba kontaktowa': 'osoba', 'E-mail': 'email', 'Telefon': 'telefon', 'Miasto': 'miasto',
   'Województwo': 'wojewodztwo', 'Zainteresowanie': 'zainteresowanie', 'Szacowana wartość (zł)': 'szac_wartosc_pln',
   'Wiadomość': 'wiadomosc', 'Źródło zgłoszenia': 'zrodlo',
+  // Formularz biura
+  'Źródło': 'zrodlo', 'Treść zapytania / notatka z rozmowy': 'wiadomosc', 'Kto wpisuje': 'wprowadzil',
 };
 const out = {};
 for (const [etykieta, pole] of Object.entries(POLA)) if (j[etykieta] !== undefined && j[etykieta] !== '') out[pole] = j[etykieta];
-if (out.wojewodztwo === '(nie wiem)') delete out.wojewodztwo;
+if (['(nie wiem)', '(ustal z miasta)'].includes(out.wojewodztwo)) delete out.wojewodztwo;
+// data + godzina kontaktu z formularza biura -> "YYYY-MM-DD HH:mm" (puste = teraz)
+const dk = String(j['Data kontaktu'] || '').slice(0, 10), gk = String(j['Godzina kontaktu'] || '').trim();
+if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dk)) out.data_kontaktu = dk + ' ' + (/^[0-9]{1,2}:[0-9]{2}$/.test(gk) ? gk.padStart(5, '0') : '08:00');
 return [{ json: out }];`;
 
 const WOJ = ['(nie wiem)', 'dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
@@ -92,7 +98,7 @@ function build(c) {
         ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX],
         ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
-        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ...extraFields,
+        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
@@ -314,7 +320,61 @@ return out;`, { executeOnce: true }),
     'Wyniki': { main: [[to('Zapisz wynik w wierszu')]] },
   });
 
-  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
+  // ---------- G. Formularz biura (Ania: telefony, maile, targi, polecenia) ----------
+  const PL = "$('Przetwórz lead').first().json";
+  const opcje = (a) => ({ values: a.map((option) => ({ option })) });
+  const G = wf('KlimatechWfG0001', 'Klimatech G – Formularz biura', [
+    node('Formularz biura', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
+      formTitle: 'Klimatech – wpisz lead (biuro)',
+      formDescription: 'Dla zapytań z telefonu, maila, targów i poleceń. Lead trafi do handlowca z województwa tak samo jak z formularza na stronie. Podaj telefon albo e-mail.',
+      formFields: {
+        values: [
+          { fieldLabel: 'Źródło', fieldType: 'dropdown', fieldOptions: opcje(['telefon', 'mail', 'targi', 'polecenie', 'inne']), requiredField: true },
+          { fieldLabel: 'Firma' },
+          { fieldLabel: 'Osoba kontaktowa' },
+          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333 – dowolny format' },
+          { fieldLabel: 'E-mail', fieldType: 'email' },
+          { fieldLabel: 'Miasto' },
+          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(['(ustal z miasta)', ...WOJ.slice(1)]) },
+          { fieldLabel: 'Zainteresowanie', fieldType: 'dropdown', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja', 'inne']), requiredField: true },
+          { fieldLabel: 'Szacowana wartość (zł)', fieldType: 'number' },
+          { fieldLabel: 'Treść zapytania / notatka z rozmowy', fieldType: 'textarea' },
+          { fieldLabel: 'Data kontaktu', fieldType: 'date' },
+          { fieldLabel: 'Godzina kontaktu', placeholder: 'np. 09:10 – puste pola daty i godziny = teraz' },
+          { fieldLabel: 'Kto wpisuje', fieldType: 'dropdown', fieldOptions: opcje(['Ania (biuro)', 'Marek', 'inna osoba']), requiredField: true },
+        ],
+      },
+      responseMode: 'lastNode',
+      options: { appendAttribution: false, buttonLabel: 'Zapisz i przekaż handlowcowi', path: 'biuro' },
+    }, { webhookId: uid('b10b10b1') }),
+    code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
+    konfiguracja([X(2), 0]),
+    getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
+    getRows('Pobierz leady', [X(4), 0], 'Leady'),
+    code('Przetwórz lead', [X(5), 0], dist('G-formularz-biura.js')),
+    ifTrue('Czy poprawny?', [X(6), 0], '={{ $json.valid }}'),
+    code('Wiersz do zapisu', [X(7), -100], 'return [{ json: ' + PL + '.row }];'),
+    append('Zapisz lead', [X(8), -100], 'Leady'),
+    code('Historia', [X(9), -100], 'return ' + PL + '.historia.map((h) => ({ json: h }));'),
+    append('Zapisz historię', [X(10), -100], 'Historia'),
+    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
+    gmail('Wyślij mail', [X(12), -200], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true, onError: 'continueRegularOutput' }),
+    ifExpr('WhatsApp?', [X(13), -100], `={{ !!${PL}.whatsapp }}`),
+    waSend('Wyślij WhatsApp', [X(14), -200], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
+    node('Podsumowanie', 'n8n-nodes-base.form', 1, [X(15), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }, { executeOnce: true }),
+    node('Popraw dane', 'n8n-nodes-base.form', 1, [X(7), 100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
+  ], {
+    'Formularz biura': { main: [[to('Zgłoszenie')]] },
+    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Czy poprawny?'),
+    'Czy poprawny?': { main: [[to('Wiersz do zapisu')], [to('Popraw dane')]] },
+    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
+    'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
+    'Wyślij mail': { main: [[to('WhatsApp?')]] },
+    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Podsumowanie')]] },
+    'Wyślij WhatsApp': { main: [[to('Podsumowanie')]] },
+  });
+
+  return { 'G-formularz-biura': G, 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
 }
 
 function write(dir, cfg) {
