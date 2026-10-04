@@ -262,6 +262,37 @@
         "jsonBody": "={{ JSON.stringify($json.rows) }}",
         "options": {}
       }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000129",
+      "name": "Do usunięcia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// CRM = lustro arkusza: usuwa wiersze, których w arkuszu już nie ma (np. po wyczyszczeniu testów).\n// Zabezpieczenie: pusty odczyt arkusza nie kasuje niczego.\nconst p = Object.fromEntries($('Przygotuj dane').all().map((i) => [i.json.tabela, i.json.rows]));\nconst out = [];\nif (p.leady && p.leady.length) out.push({ json: { tabela: 'leady', filtr: 'lead_id=not.in.(' + p.leady.map((r) => r.lead_id).join(',') + ')' } });\nif (p.historia && p.historia.length) out.push({ json: { tabela: 'historia', filtr: 'id=not.in.(' + p.historia.map((r) => r.id).join(',') + ')' } });\nreturn out;"
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000130",
+      "name": "Usuń nieaktualne",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $('Konfiguracja').first().json.SUPABASE_URL }}/rest/v1/{{ $json.tabela }}?{{ $json.filtr }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpCustomAuth",
+        "options": {}
+      }
     }
   ],
   "connections": {
@@ -336,6 +367,28 @@
         [
           {
             "node": "Zapisz w Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zapisz w Supabase": {
+      "main": [
+        [
+          {
+            "node": "Do usunięcia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Do usunięcia": {
+      "main": [
+        [
+          {
+            "node": "Usuń nieaktualne",
             "type": "main",
             "index": 0
           }

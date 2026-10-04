@@ -257,10 +257,23 @@ function build(c) {
       sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.rows) }}',
       options: {},
     }, { credentials: supaCred }),
+    code('Do usunięcia', [X(7), 0], `// CRM = lustro arkusza: usuwa wiersze, których w arkuszu już nie ma (np. po wyczyszczeniu testów).
+// Zabezpieczenie: pusty odczyt arkusza nie kasuje niczego.
+const p = Object.fromEntries($('Przygotuj dane').all().map((i) => [i.json.tabela, i.json.rows]));
+const out = [];
+if (p.leady && p.leady.length) out.push({ json: { tabela: 'leady', filtr: 'lead_id=not.in.(' + p.leady.map((r) => r.lead_id).join(',') + ')' } });
+if (p.historia && p.historia.length) out.push({ json: { tabela: 'historia', filtr: 'id=not.in.(' + p.historia.map((r) => r.id).join(',') + ')' } });
+return out;`, { executeOnce: true }),
+    node('Usuń nieaktualne', 'n8n-nodes-base.httpRequest', 4.2, [X(8), 0], {
+      method: 'DELETE',
+      url: `={{ ${K('SUPABASE_URL')} }}/rest/v1/{{ $json.tabela }}?{{ $json.filtr }}`,
+      authentication: 'genericCredentialType', genericAuthType: 'httpCustomAuth',
+      options: {},
+    }, { credentials: supaCred }),
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase'),
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
   });
 
   return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E };
