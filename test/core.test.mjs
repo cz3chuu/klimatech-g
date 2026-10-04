@@ -122,3 +122,75 @@ test('n8n/dist: węzeł "Przetwórz lead" uruchamia się z mockiem $', () => {
   assert.equal(out[0].json.valid, true);
   assert.equal(out[0].json.row.handlowiec_id, 'H5');
 });
+
+// --- WhatsApp ---
+const cfgWa = { ...cfg, KANAL: 'oba', TRYB_TESTOWY: 'true', TEST_INBOX: 'test@example.com', TEST_WHATSAPP: '600 111 222', GREEN_PHONE: '48600999888' };
+const msg = (text, quoted, chatId = '48600111222@c.us', id = 'M' + Math.random()) =>
+  ({ type: 'incoming', idMessage: id, chatId, typeMessage: quoted ? 'quotedMessage' : 'textMessage', textMessage: quoted ? undefined : text,
+    extendedTextMessage: quoted ? { text } : undefined, quotedMessage: quoted ? { textMessage: quoted } : undefined });
+
+test('WA: nowy lead -> krótka wiadomość na numer testowy z 🆔 i instrukcją', () => {
+  const r = core.processInquiry({ firma: 'Nowa', telefon: '700 300 400', miasto: 'Gdańsk', wojewodztwo: 'pomorskie' }, rows, handlowcy, cfgWa, '2026-10-05 09:00');
+  assert.equal(r.whatsapp.chatId, '48600111222@c.us');
+  assert.match(r.whatsapp.message, /^\[TEST → Ewa Sowa\]/);
+  assert.match(r.whatsapp.message, /🆔 L-041/);
+  assert.match(r.whatsapp.message, /📞 \+48 700 300 400/);
+  assert.equal(core.processInquiry({ firma: 'X', telefon: '700 300 400' }, rows, handlowcy, { ...cfgWa, KANAL: 'mail' }, '2026-10-05 09:00').whatsapp, null);
+});
+test('WA: ponowienie -> 🆔 leada pierwotnego', () => {
+  const r = core.processInquiry({ firma: 'Kowalczyk', telefon: '607210530' }, rows, handlowcy, cfgWa, '2026-10-05 09:00');
+  assert.match(r.whatsapp.message, /🆔 L-007 \(nowe zgłoszenie: L-041\)/);
+});
+test('WA: rozpoznawanie odpowiedzi', () => {
+  assert.deepEqual(core.parseWaReply('1', 'NOWY LEAD\n🆔 L-041\n1 = ...'), { status: 'dodzwoniono', lead_id: 'L-041', wiele: false });
+  assert.equal(core.parseWaReply('L-7 3', '').lead_id, 'L-007');
+  assert.equal(core.parseWaReply('L-007 3', '').status, 'umowione');
+  assert.equal(core.parseWaReply('nie odebrał', '').status, 'nie_odebral');
+  assert.equal(core.parseWaReply('Dodzwoniłem się, oddzwoni w piątek', '').status, 'dodzwoniono');
+  assert.deepEqual(core.parseWaReply('2', '🆔 L-035\n\n🆔 L-036'), { status: 'nie_odebral', lead_id: '', wiele: true }); // zbiorcze -> podaj numer
+  assert.equal(core.parseWaReply('L-036 2', '🆔 L-035\n\n🆔 L-036').lead_id, 'L-036');
+});
+test('WA: odpowiedź z cytatem zapisuje status, potwierdza i loguje id wiadomości', () => {
+  const out = core.processWaReplies([msg('1', '🔔 NOWY LEAD\n🆔 L-005\n…')], rows, handlowcy, cfgWa, '2026-10-05 10:00');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].update.status, 'dodzwoniono');
+  assert.equal(out[0].update.pierwszy_kontakt, '2026-10-05 10:00');
+  assert.equal(out[0].update.kontakt_kto, 'H4');
+  assert.match(out[0].reply.message, /✅ Zapisano: L-005 Hydro-Max/);
+  assert.match(out[0].historia[0].szczegoly, /wa:/);
+});
+test('WA: nie odebrał nie zamyka SLA; obce numery, grupy i luźne rozmowy ignorowane', () => {
+  const nie = core.processWaReplies([msg('2', '🆔 L-005')], rows, handlowcy, cfgWa, '2026-10-05 10:00')[0];
+  assert.equal(nie.update.status, 'nie_odebral');
+  assert.equal(nie.update.pierwszy_kontakt, undefined);
+  assert.equal(core.processWaReplies([msg('1', '🆔 L-005', '48999888777@c.us')], rows, handlowcy, cfgWa, 'x').length, 0);
+  assert.equal(core.processWaReplies([msg('1', '🆔 L-005', '123@g.us')], rows, handlowcy, cfgWa, 'x').length, 0);
+  assert.equal(core.processWaReplies([msg('cześć, jak tam?')], rows, handlowcy, cfgWa, 'x').length, 0);
+});
+test('WA: bez cytatu i numeru leada -> prośba o doprecyzowanie, nic nie zapisane', () => {
+  const out = core.processWaReplies([msg('1')], rows, handlowcy, cfgWa, '2026-10-05 10:00');
+  assert.equal(out[0].update, undefined);
+  assert.match(out[0].reply.message, /którego leada/);
+});
+test('WA: produkcyjnie handlowiec nie zmieni cudzego leada', () => {
+  const hz = handlowcy.map((h) => ({ ...h, whatsapp: h.handlowiec_id === 'H1' ? '501000001' : '' }));
+  const prod = { ...cfgWa, TRYB_TESTOWY: 'false' };
+  const out = core.processWaReplies([msg('1', '🆔 L-005', '48501000001@c.us')], rows, hz, prod, '2026-10-05 10:00');
+  assert.match(out[0].reply.message, /nie jest Twoim leadem/);
+  assert.equal(out[0].update, undefined);
+});
+test('WA: przypomnienia SLA – jedna wiadomość na odbiorcę', () => {
+  const items = core.checkSla(rows, handlowcy, cfgWa, '2026-10-05 15:00');
+  const wa = core.groupSlaWhatsapp(items, cfgWa);
+  const odbiorcy = new Set(items.map((i) => i.do.id));
+  assert.equal(wa.length, odbiorcy.size);
+  assert.ok(wa.every((w) => w.chatId === '48600111222@c.us' && /🆔 L-\d{3}/.test(w.message)));
+});
+test('WA: makieta na jednym telefonie – odpowiedź w czacie „Ty” działa, wiadomości z API pomijane', () => {
+  const c1 = { ...cfgWa, TEST_WHATSAPP: '48600999888' };
+  const own = (text, quoted, sendByApi) => ({ ...msg(text, quoted, '48600999888@c.us'), type: 'outgoing', sendByApi });
+  assert.equal(core.processWaReplies([own('1', '🆔 L-005', false)], rows, handlowcy, c1, '2026-10-05 10:00')[0].update.status, 'dodzwoniono');
+  assert.equal(core.processWaReplies([own('1', '🆔 L-005', true)], rows, handlowcy, c1, 'x').length, 0);
+  assert.equal(core.processWaReplies([own('✅ Zapisano: L-005 Hydro-Max – Dodzwoniono się.', '', false)], rows, handlowcy, c1, 'x').length, 0);
+  assert.equal(core.processWaReplies([own('1', '🆔 L-005', false)], rows, handlowcy, cfgWa, 'x').length, 0); // tryb dwóch telefonów: ignoruj
+});

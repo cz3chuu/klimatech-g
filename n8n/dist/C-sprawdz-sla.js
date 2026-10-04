@@ -204,11 +204,13 @@ function route(wojewodztwo, handlowcyMap) {
   const h = handlowcyMap[wojewodztwo];
   return h ? { routing: 'handlowiec', handlowiec: h } : { routing: 'bez_opiekuna', handlowiec: null };
 }
+function marekOf(cfg) { return { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL, whatsapp: cfg.MAREK_WHATSAPP || '' }; }
+function aniaOf(cfg) { return { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL, whatsapp: cfg.ANIA_WHATSAPP || '' }; }
 function recipientFor(row, handlowcyRows, cfg) {
-  if (row.routing === 'bez_opiekuna') return { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL };
-  if (row.routing === 'do_ustalenia') return { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL };
+  if (row.routing === 'bez_opiekuna') return marekOf(cfg);
+  if (row.routing === 'do_ustalenia') return aniaOf(cfg);
   const h = handlowcyRows.find((x) => x.handlowiec_id === row.handlowiec_id);
-  return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email } : { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL };
+  return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email, whatsapp: h.whatsapp || '' } : aniaOf(cfg);
 }
 
 // ---------------- Pomocnicze ----------------
@@ -257,6 +259,136 @@ function wrapTestMode(email, cfg) {
     cc: '',
     subject: `[TEST → ${email.to}${email.cc ? ' cc ' + email.cc : ''}] ${email.subject}`,
   };
+}
+
+// ---------------- WhatsApp (Green API w makiecie, docelowo WhatsApp Cloud API) ----------------
+// Handlowiec potwierdza kontakt, odpowiadając na wiadomość z leadem cyfrą 1–4.
+
+const WA_ODPOWIEDZI = { 1: 'dodzwoniono', 2: 'nie_odebral', 3: 'umowione', 4: 'niezainteresowany' };
+const WA_SLOWA = [
+  [/dodzwoni|rozmawia/, 'dodzwoniono'], [/nie\s*odebra/, 'nie_odebral'],
+  [/niezainteres|nie\s*zainteres/, 'niezainteresowany'], [/umówi|umowi|spotkani/, 'umowione'],
+];
+const WA_STOPKA = 'Po rozmowie *odpowiedz na tę wiadomość* cyfrą:\n1 = dodzwoniłem się · 2 = nie odebrał\n3 = umówione · 4 = niezainteresowany';
+
+function waChatId(num) {
+  let d = String(num ?? '').replace(/@.*$/, '').replace(/\D/g, '');
+  if (d.length === 9) d = '48' + d;
+  return d ? d + '@c.us' : '';
+}
+function kanalWa(cfg) { return String(cfg.KANAL || 'mail') !== 'mail'; }
+function wrapTestModeWa(msg, cfg) {
+  if (String(cfg.TRYB_TESTOWY) !== 'true') return msg.chatId ? msg : null;
+  const chatId = waChatId(cfg.TEST_WHATSAPP);
+  return chatId ? { chatId, message: `[TEST → ${msg.nazwa}]\n${msg.message}` } : null;
+}
+function skroc(s, n) { s = String(s ?? '').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+function waLeadMessage(row, naglowek, info, target) {
+  const linie = [
+    `${naglowek} · ${row.wojewodztwo || 'woj. nieustalone'}`,
+    `*${row.firma || row.osoba}*${row.firma && row.osoba ? ` – ${row.osoba}` : ''}`,
+    row.telefon_norm ? `📞 ${formatPhone(row.telefon_norm)}` : `✉️ ${row.email || 'brak kontaktu'}`,
+    `💰 ${zl(row.szac_wartosc_pln)} · ${row.zainteresowanie || 'zapytanie'}${row.miasto ? ` · ${row.miasto}` : ''}`,
+    row.wiadomosc ? `💬 „${skroc(row.wiadomosc, 160)}”` : '',
+    info ? `\n${info}` : '',
+    `\n🆔 ${target.lead_id}${target.lead_id !== row.lead_id ? ` (nowe zgłoszenie: ${row.lead_id})` : ''}`,
+    '────────',
+    WA_STOPKA,
+  ];
+  return linie.filter(Boolean).join('\n');
+}
+
+// Rozpoznaje odpowiedź: "1", "L-041 1", "dodzwoniłem się"... oraz lead z cytowanej wiadomości
+function parseWaReply(text, quoted) {
+  const t = String(text ?? '').trim().toLowerCase();
+  const idTxt = (t.match(/\bl-?\s?(\d{1,4})\b/) || [])[1];
+  let status = '';
+  const cyfra = t.replace(/\bl-?\s?\d{1,4}\b/, '').match(/(?:^|\s)([1-4])(?:\s|$|[.!,])/);
+  if (cyfra) status = WA_ODPOWIEDZI[cyfra[1]];
+  else for (const [re, s] of WA_SLOWA) if (re.test(t)) { status = s; break; }
+  const q = String(quoted ?? '');
+  // 🆔 oznacza leada, którego dotyczy wiadomość; kilka 🆔 = zbiorcze przypomnienie -> trzeba podać numer
+  const ids = [...new Set([...q.matchAll(/🆔\s*(L-\d+)/g)].map((x) => x[1]))];
+  const lead_id = idTxt ? 'L-' + idTxt.padStart(3, '0') : ids.length === 1 ? ids[0] : '';
+  return { status, lead_id, wiele: !idTxt && ids.length > 1 };
+}
+
+// Wspólne dla kliknięcia linku (B) i odpowiedzi z WhatsAppa (D)
+function applyStatus(row, s, kto, now, zrodlo) {
+  const zamyka = STATUSY_ZAMYKAJACE_SLA.includes(s);
+  const pierwszy = zamyka && !row.pierwszy_kontakt;
+  const update = { lead_id: row.lead_id, status: s, proby: (Number(row.proby) || 0) + 1, aktualizacja: now };
+  if (pierwszy) {
+    update.pierwszy_kontakt = now;
+    update.kontakt_kto = kto || row.handlowiec_id || '';
+  }
+  const czasMin = pierwszy ? businessMinutes(row.data_zgloszenia, now) : null;
+  return {
+    update,
+    czas: czasMin === null ? '' : `${fmtGodziny(czasMin)} roboczych`,
+    historia: [{ czas: now, lead_id: row.lead_id, zdarzenie: 'status', szczegoly: `${s} (${zrodlo}: ${kto || '—'})` }],
+  };
+}
+
+// Przetwarza wiadomości przychodzące z Green API (lastIncomingMessages / webhook)
+function processWaReplies(messages, rows, handlowcyRows, cfg, now) {
+  const test = String(cfg.TRYB_TESTOWY) === 'true';
+  const firmowy = waChatId(cfg.GREEN_PHONE);
+  // Makieta na jednym telefonie: numer testowy = numer firmowy -> odpowiedzi wpisywane w czacie „Ty” (wychodzące z telefonu, nie z API)
+  const jedenTelefon = test && firmowy && waChatId(cfg.TEST_WHATSAPP) === firmowy;
+  const out = [];
+  for (const m of messages) {
+    if (!m || !m.chatId || String(m.chatId).endsWith('@g.us')) continue;
+    const zCzatuTy = jedenTelefon && m.type === 'outgoing' && m.chatId === firmowy && !m.sendByApi;
+    if (m.type && m.type !== 'incoming' && !zCzatuTy) continue;
+    if (firmowy && m.chatId === firmowy && !zCzatuTy) continue;
+    const text = m.textMessage || (m.extendedTextMessage && m.extendedTextMessage.text) || '';
+    if (/^\s*(\[TEST|✅|📵|📅|✖|❓|⛔)/.test(text)) continue; // nasze własne wiadomości
+    const qm = m.quotedMessage || {};
+    const quoted = qm.textMessage || (qm.extendedTextMessage && qm.extendedTextMessage.text) || '';
+    const p = parseWaReply(text, quoted);
+    // Rozmowy, które nie dotyczą leadów, ignorujemy po cichu
+    if (!p.status && !/🆔|L-\d/.test(quoted) && !/\bl-?\s?\d/i.test(text)) continue;
+
+    const reply = (message) => ({ chatId: m.chatId, message });
+    const base = { idMessage: m.idMessage, chatId: m.chatId };
+    const nadawcaH = handlowcyRows.find((h) => waChatId(h.whatsapp) === m.chatId);
+    const marek = waChatId(cfg.MAREK_WHATSAPP) === m.chatId;
+    const ania = waChatId(cfg.ANIA_WHATSAPP) === m.chatId;
+    const dozwolonyTest = (test && m.chatId === waChatId(cfg.TEST_WHATSAPP)) || zCzatuTy;
+    if (!nadawcaH && !marek && !ania && !dozwolonyTest) continue; // obcy numer – nie odpowiadamy
+
+    if (!p.status) { out.push({ ...base, reply: reply('❓ Nie rozpoznałem statusu. Odpowiedz cyfrą: 1 = dodzwoniłem się, 2 = nie odebrał, 3 = umówione, 4 = niezainteresowany.') }); continue; }
+    let lead_id = p.lead_id;
+    if (!lead_id) {
+      const otwarte = rows.filter((r) => r.lead_id && r.duplikat_typ !== 'pewny' && !STATUSY_ZAMYKAJACE_SLA.includes(r.status) &&
+        (nadawcaH ? r.handlowiec_id === nadawcaH.handlowiec_id : false));
+      if (otwarte.length === 1) lead_id = otwarte[0].lead_id;
+      else {
+        out.push({ ...base, reply: reply(p.wiele
+          ? '❓ Ta wiadomość dotyczy kilku leadów. Napisz numer leada i cyfrę, np. „L-041 1”.'
+          : '❓ Nie wiem, którego leada dotyczy odpowiedź. Odpowiedz bezpośrednio na wiadomość z leadem (przesuń ją w prawo) albo napisz np. „L-041 1”.') });
+        continue;
+      }
+    }
+    const row = rows.find((r) => r.lead_id === lead_id);
+    if (!row) { out.push({ ...base, reply: reply(`❓ Nie znalazłem leada ${lead_id}.`) }); continue; }
+    const kto = nadawcaH ? nadawcaH.handlowiec_id : marek ? 'MAREK' : ania ? 'ANIA' : (row.handlowiec_id || 'TEST');
+    if (nadawcaH && row.handlowiec_id !== nadawcaH.handlowiec_id) {
+      out.push({ ...base, reply: reply(`⛔ ${lead_id} nie jest Twoim leadem – nic nie zmieniłem.`) });
+      continue;
+    }
+    const r = applyStatus(row, p.status, kto, now, 'WhatsApp');
+    const ikona = { dodzwoniono: '✅', nie_odebral: '📵', umowione: '📅', niezainteresowany: '✖' }[p.status];
+    const dopisek = p.status === 'nie_odebral' ? ` To ${r.update.proby}. próba – lead dalej czeka, przypomnę.` : r.czas ? ` Czas do kontaktu: ${r.czas}.` : '';
+    out.push({
+      ...base, lead_id, update: r.update,
+      historia: r.historia.map((h) => ({ ...h, szczegoly: `${h.szczegoly}; wa:${m.idMessage}` })),
+      reply: reply(`${ikona} Zapisano: ${lead_id} ${row.firma || row.osoba} – ${STATUS_ETYKIETY[p.status]}.${dopisek}`),
+    });
+  }
+  return out;
 }
 
 // ---------------- Przetworzenie nowego zapytania (workflow A) ----------------
@@ -335,23 +467,33 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   const odbiorca = recipientFor(row, handlowcyRows, cfg);
   const opis = `${row.firma || row.osoba} (${row.wojewodztwo || 'woj. nieustalone'})`;
 
-  let subject, intro;
+  let subject, intro, waNaglowek, waInfo = '';
   if (pewny && oryginalZamkniety) {
+    waNaglowek = '♻️ *ZNANY KLIENT pisze ponownie*';
+    waInfo = `Był już kontakt (${original.lead_id}, ${STATUS_ETYKIETY[original.status] || original.status}${original.pierwszy_kontakt ? ', ' + original.pierwszy_kontakt : ''}). Sprawdź ustalenia, zanim podasz cenę.`;
     subject = `Znany klient pisze ponownie: ${opis}`;
     intro = `Ten klient był już obsłużony: ${original.lead_id} z ${original.data_zgloszenia}, status <b>${STATUS_ETYKIETY[original.status] || original.status}</b>` +
       `${original.pierwszy_kontakt ? `, kontakt ${original.pierwszy_kontakt}` : ''}${original.kontakt_kto ? ` (${esc(original.kontakt_kto)})` : ''}. ` +
       'Zanim zadzwonisz, sprawdź ustalenia z poprzedniej rozmowy, żeby nie podać innej ceny.';
   } else if (pewny) {
+    waNaglowek = '⚠️ *PONOWIENIE – klient czeka*';
+    waInfo = `Klient pisze drugi raz. Pierwsze zapytanie ${original.lead_id} z ${original.data_zgloszenia} nadal bez kontaktu. Zadzwoń jak najszybciej.`;
     subject = `⚠ PONOWIENIE – klient czeka: ${opis}`;
     intro = `Klient pisze <b>drugi raz</b>. Pierwsze zapytanie ${original.lead_id} z ${original.data_zgloszenia} nadal bez kontaktu ` +
       `(dopasowanie po: ${dup.powod}). Priorytet – zadzwoń jak najszybciej.`;
   } else if (row.routing === 'bez_opiekuna') {
+    waNaglowek = '🟠 *LEAD BEZ OPIEKUNA*';
+    waInfo = 'Województwo bez handlowca – lead u Pana do decyzji, kto obsługuje region.';
     subject = `BEZ OPIEKUNA: ${row.wojewodztwo} – ${row.firma || row.osoba}, ${zl(row.szac_wartosc_pln)}`;
     intro = `Województwo <b>${esc(row.wojewodztwo)}</b> nie ma przypisanego handlowca. Lead trafia do Pana, dopóki nie zapadnie decyzja, kto obsługuje ten region.`;
   } else if (row.routing === 'do_ustalenia') {
+    waNaglowek = '❓ *LEAD DO PRZYPISANIA*';
+    waInfo = 'Nie udało się ustalić województwa – proszę przypisać handlowca.';
     subject = `Do przypisania: ${row.firma || row.osoba} – brak województwa`;
     intro = 'Nie udało się ustalić województwa (brak w formularzu, nieznane miasto). Proszę ustalić i przypisać handlowca.';
   } else {
+    waNaglowek = '🔔 *NOWY LEAD*';
+    if (row.wojewodztwo_zrodlo === 'miasto') waInfo = `Województwo ustalone z miasta (${row.miasto}).`;
     subject = `Nowy lead: ${opis} – ${row.zainteresowanie || 'zapytanie'}, ${zl(row.szac_wartosc_pln)}`;
     intro = row.wojewodztwo_zrodlo === 'miasto'
       ? `Województwo ustalone automatycznie na podstawie miasta (${esc(row.miasto)}).`
@@ -360,6 +502,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
 
   const cc = [];
   if (dup && dup.typ === 'mozliwy') {
+    waInfo += `${waInfo ? '\n' : ''}ℹ Możliwy duplikat ${dup.original ? dup.original.lead_id : ''} (${dup.powod}) – biuro potwierdzi.`;
     intro += `<br><br>ℹ Możliwy duplikat ${dup.original ? dup.original.lead_id : ''} (${dup.powod}) – do potwierdzenia przez biuro.`;
     if (cfg.ANIA_EMAIL && odbiorca.email !== cfg.ANIA_EMAIL) cc.push(cfg.ANIA_EMAIL);
   }
@@ -370,18 +513,23 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
 <p style="color:#888;font-size:12px">${row.lead_id}${pewny ? ` → dotyczy ${original.lead_id}` : ''} · zgłoszono ${row.data_zgloszenia} · zegar SLA od ${slaStart(row.data_zgloszenia)}</p></div>`;
 
   const email = wrapTestMode({ to: odbiorca.email, cc: cc.join(','), subject, html }, cfg);
+  const whatsapp = kanalWa(cfg)
+    ? wrapTestModeWa({ chatId: waChatId(odbiorca.whatsapp), nazwa: odbiorca.nazwa, message: waLeadMessage(row, waNaglowek, waInfo, target) }, cfg)
+    : null;
 
   const historia = [
     { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})` },
   ];
   if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
   historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
-  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
+  if (String(cfg.KANAL || 'mail') !== 'whatsapp') historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
+  if (whatsapp) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `WhatsApp do ${odbiorca.nazwa}` });
 
   return {
     valid: true,
     row,
     email,
+    whatsapp,
     historia,
     response: {
       ok: true,
@@ -409,22 +557,12 @@ function applyStatusClick(query, rows, now) {
   if (!q.t || String(row.token) !== String(q.t)) return { ok: false, html: page('Nieprawidłowy link', 'Link jest niepoprawny lub nieaktualny.', 'err') };
   if (!STATUSY.includes(q.s) || q.s === 'nowy') return { ok: false, html: page('Nieznany status', esc(q.s), 'err') };
 
-  const zamyka = STATUSY_ZAMYKAJACE_SLA.includes(q.s);
-  const update = {
-    lead_id: row.lead_id,
-    status: q.s,
-    proby: (Number(row.proby) || 0) + 1,
-    aktualizacja: now,
-  };
-  if (zamyka && !row.pierwszy_kontakt) {
-    update.pierwszy_kontakt = now;
-    update.kontakt_kto = q.kto || row.handlowiec_id || '';
-  }
-  const czas = zamyka && !row.pierwszy_kontakt ? ` Czas do kontaktu: ${fmtGodziny(businessMinutes(row.data_zgloszenia, now))} roboczych.` : '';
+  const r = applyStatus(row, q.s, q.kto, now, 'kliknął');
+  const czas = r.czas ? ` Czas do kontaktu: ${r.czas}.` : '';
   return {
     ok: true,
-    update,
-    historia: [{ czas: now, lead_id: row.lead_id, zdarzenie: 'status', szczegoly: `${q.s} (kliknął: ${q.kto || '—'})` }],
+    update: r.update,
+    historia: r.historia,
     html: page('Zapisano', `${esc(row.firma)} – <b>${STATUS_ETYKIETY[q.s]}</b>.${czas}${q.s === 'nie_odebral' ? ' Lead dalej czeka na rozmowę, przypomnimy.' : ''}`, 'ok'),
   };
 }
@@ -442,7 +580,7 @@ function checkSla(rows, handlowcyRows, cfg, now) {
     const level = slaLevel(min);
     if (level <= (Number(r.sla_poziom) || 0)) continue;
     const owner = recipientFor(r, handlowcyRows, cfg);
-    const marek = { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL };
+    const marek = marekOf(cfg);
     out.push({
       lead_id: r.lead_id, poziom: level, minuty: min,
       do: level >= 3 ? marek : owner,
@@ -477,6 +615,27 @@ Tel. <a href="tel:${esc(r.telefon_norm)}">${esc(formatPhone(r.telefon_norm) || r
     const html = `<div style="font-family:Arial,sans-serif;font-size:14px;max-width:640px"><h3 style="color:${o.kolor}">${o.tytul}</h3>${lista}</div>`;
     return wrapTestMode({ to: g.do.email, cc: '', subject, html }, cfg);
   });
+}
+
+// Jedna wiadomość WhatsApp na odbiorcę (wszystkie poziomy razem) – krótka, do czytania w trasie
+function groupSlaWhatsapp(items, cfg) {
+  if (!kanalWa(cfg)) return [];
+  const groups = {};
+  items.forEach((it) => { (groups[it.do.id] = groups[it.do.id] || { do: it.do, items: [] }).items.push(it); });
+  const ikona = { 1: '⏰', 2: '🔴', 3: '🚨' };
+  return Object.values(groups).map((g) => {
+    const lista = g.items.sort((a, b) => b.poziom - a.poziom || b.minuty - a.minuty).map((it) => {
+      const r = it.wiersz;
+      return `${ikona[it.poziom]} *${r.firma || r.osoba}* · ${r.wojewodztwo || '—'} · ${zl(r.szac_wartosc_pln)}\n` +
+        `📞 ${formatPhone(r.telefon_norm) || r.telefon || r.email} · czeka ${fmtGodziny(it.minuty)}` +
+        `${it.do.id !== it.opiekun.id ? ` · opiekun: ${it.opiekun.nazwa}` : ''}\n🆔 ${r.lead_id}`;
+    }).join('\n\n');
+    const eskalacja = g.items.some((it) => it.poziom >= 3);
+    const tytul = eskalacja ? `🚨 *ESKALACJA: ${g.items.length} lead(y) bez kontaktu*` : `⏰ *Leady czekają na telefon (${g.items.length})*`;
+    const stopka = g.items.length === 1 ? WA_STOPKA
+      : `Po rozmowie odpowiedz na tę wiadomość: *numer leada + cyfra*, np. „${g.items[0].wiersz.lead_id} 1”\n1 = dodzwoniłem się · 2 = nie odebrał · 3 = umówione · 4 = niezainteresowany`;
+    return wrapTestModeWa({ chatId: waChatId(g.do.whatsapp), nazwa: g.do.nazwa, message: `${tytul}\n\n${lista}\n────────\n${stopka}` }, cfg);
+  }).filter(Boolean);
 }
 
 // === Węzeł Code: "Sprawdź SLA" (workflow C, tryb: Run Once for All Items) ===

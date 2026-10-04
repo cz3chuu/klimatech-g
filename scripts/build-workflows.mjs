@@ -1,4 +1,4 @@
-// Generuje gotowe do importu workflow n8n (A, B, C) z kodem z n8n/dist/.
+// Generuje gotowe do importu workflow n8n (A, B, C, D) z kodem z n8n/dist/.
 // Użycie: node scripts/build-workflows.mjs
 //  - zawsze:                       n8n/workflows/*.json        (szablon do repo, wartości przykładowe)
 //  - jeśli jest n8n/config.local.json: n8n/workflows.local/*.json (Twoje ID arkusza, credentials, adresy) – w .gitignore
@@ -16,6 +16,14 @@ const PRZYKLAD = {
   TEST_INBOX: 'twoj.mail+klimatech@gmail.com',
   TRYB_TESTOWY: 'true',
   N8N_URL: 'http://localhost:5678',
+  KANAL: 'oba', // mail | whatsapp | oba
+  TEST_WHATSAPP: '48600000000',
+  GREEN_API_URL: 'https://7107.api.greenapi.com',
+  GREEN_ID: 'WKLEJ_ID_INSTANCJI',
+  GREEN_TOKEN: 'WKLEJ_TOKEN',
+  GREEN_PHONE: '',
+  MAREK_WHATSAPP: '',
+  ANIA_WHATSAPP: '',
 };
 
 // Kod małych węzłów (bez rdzenia)
@@ -79,11 +87,21 @@ function build(c) {
     assignments: {
       assignments: [
         ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX],
-        ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ...extraFields,
+        ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`],
+        ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
+        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
   });
+  const K = (f) => `$('Konfiguracja').first().json.${f}`;
+  const greenUrl = (metoda, query = '') => `={{ ${K('GREEN_API_URL')} }}/waInstance{{ ${K('GREEN_ID')} }}/${metoda}/{{ ${K('GREEN_TOKEN')} }}${query}`;
+  const waSend = (name, pos, chatIdExpr, messageExpr, extra = {}) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
+    method: 'POST', url: greenUrl('sendMessage'), sendBody: true, specifyBody: 'json',
+    jsonBody: `={{ JSON.stringify({ chatId: ${chatIdExpr}, message: ${messageExpr} }) }}`, options: {},
+  }, { onError: 'continueRegularOutput', ...extra });
+  const ifExpr = (name, pos, expr) => { const n = ifTrue(name, pos, expr); n.executeOnce = true; return n; };
+  const to = (name) => ({ node: name, type: 'main', index: 0 });
   const chain = (...names) => Object.fromEntries(names.slice(0, -1).map((a, i) => [a, { main: [[{ node: names[i + 1], type: 'main', index: 0 }]] }]));
   const wf = (id, name, nodes, connections) => ({
     id, name, active: false, nodes, connections, settings: { executionOrder: 'v1', timezone: 'Europe/Warsaw' }, pinData: {},
@@ -124,16 +142,23 @@ function build(c) {
     append('Zapisz lead', [X(8), -100], 'Leady'),
     code('Historia', [X(9), -100], "return $('Przetwórz lead').first().json.historia.map((h) => ({ json: h }));"),
     append('Zapisz historię', [X(10), -100], 'Historia'),
-    gmail('Wyślij mail', [X(11), -100], "={{ $('Przetwórz lead').first().json.email.to }}",
-      "={{ $('Przetwórz lead').first().json.email.subject }}", "={{ $('Przetwórz lead').first().json.email.html }}", { executeOnce: true }),
-    code('Odpowiedź', [X(12), -100], "// Odpowiedź dla webhooka (JSON z lead_id, routingiem, duplikatem)\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
+    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
+    gmail('Wyślij mail', [X(12), -200], "={{ $('Przetwórz lead').first().json.email.to }}",
+      "={{ $('Przetwórz lead').first().json.email.subject }}", "={{ $('Przetwórz lead').first().json.email.html }}", { executeOnce: true, onError: 'continueRegularOutput' }),
+    ifExpr('WhatsApp?', [X(13), -100], "={{ !!$('Przetwórz lead').first().json.whatsapp }}"),
+    waSend('Wyślij WhatsApp', [X(14), -200], "$('Przetwórz lead').first().json.whatsapp.chatId", "$('Przetwórz lead').first().json.whatsapp.message", { executeOnce: true }),
+    code('Odpowiedź', [X(15), -100], "// Odpowiedź dla webhooka (JSON z lead_id, routingiem, duplikatem)\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
     code('Błąd walidacji', [X(7), 100], "// Nic nie zapisujemy – zwracamy listę błędów\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
   ], {
     Formularz: { main: [[{ node: 'Zgłoszenie', type: 'main', index: 0 }]] },
     Webhook: { main: [[{ node: 'Zgłoszenie', type: 'main', index: 0 }]] },
     ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Czy poprawny?'),
     'Czy poprawny?': { main: [[{ node: 'Wiersz do zapisu', type: 'main', index: 0 }], [{ node: 'Błąd walidacji', type: 'main', index: 0 }]] },
-    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Wyślij mail', 'Odpowiedź'),
+    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
+    'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
+    'Wyślij mail': { main: [[to('WhatsApp?')]] },
+    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Odpowiedź')]] },
+    'Wyślij WhatsApp': { main: [[to('Odpowiedź')]] },
   });
 
   // ---------- B. Status z maila ----------
@@ -171,14 +196,47 @@ function build(c) {
     code('Historia SLA', [X(7), 0], dist('C-historia-sla.js')),
     append('Zapisz historię', [X(8), 0], 'Historia'),
     code('Grupuj maile', [X(9), 0], dist('C-grupuj-maile.js')),
-    gmail('Wyślij mail', [X(10), 0], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}'),
+    gmail('Wyślij mail', [X(10), 0], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}', { onError: 'continueRegularOutput' }),
+    code('Grupuj WhatsApp', [X(9), 200], dist('C-grupuj-whatsapp.js')),
+    waSend('Wyślij WhatsApp', [X(10), 200], '$json.chatId', '$json.message'),
   ], {
     'Co 15 minut': { main: [[{ node: 'Konfiguracja', type: 'main', index: 0 }]] },
     'Test ręczny': { main: [[{ node: 'Konfiguracja', type: 'main', index: 0 }]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Sprawdź SLA', 'Wiersze SLA', 'Zapisz poziom SLA', 'Historia SLA', 'Zapisz historię', 'Grupuj maile', 'Wyślij mail'),
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Sprawdź SLA', 'Wiersze SLA', 'Zapisz poziom SLA', 'Historia SLA', 'Zapisz historię'),
+    'Zapisz historię': { main: [[to('Grupuj maile'), to('Grupuj WhatsApp')]] },
+    'Grupuj maile': { main: [[to('Wyślij mail')]] },
+    'Grupuj WhatsApp': { main: [[to('Wyślij WhatsApp')]] },
   });
 
-  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C };
+  // ---------- D. Odpowiedzi z WhatsAppa ----------
+  const D = wf('KlimatechWfD0001', 'Klimatech D – Odpowiedzi z WhatsAppa (co 1 min)', [
+    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
+    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
+    konfiguracja([X(1), 0]),
+    node('Pobierz wiadomości', 'n8n-nodes-base.httpRequest', 4.2, [X(2), 0], { method: 'GET', url: greenUrl('lastIncomingMessages', '?minutes=10'), options: {} },
+      { executeOnce: true, alwaysOutputData: true }),
+    node('Pobierz wysłane', 'n8n-nodes-base.httpRequest', 4.2, [X(3), 0], { method: 'GET', url: greenUrl('lastOutgoingMessages', '?minutes=10'), options: {} },
+      { executeOnce: true, alwaysOutputData: true }),
+    getRows('Pobierz leady', [X(4), 0], 'Leady'),
+    getRows('Pobierz handlowców', [X(5), 0], 'Handlowcy'),
+    code('Przetwórz odpowiedzi', [X(6), 0], dist('D-odpowiedzi-wa.js')),
+    code('Aktualizacje', [X(7), -200], 'return $input.all().filter((i) => i.json.update).map((i) => ({ json: i.json.update }));'),
+    update('Aktualizuj lead', [X(8), -200]),
+    code('Wpisy historii', [X(7), 0], 'return $input.all().flatMap((i) => (i.json.historia || []).map((h) => ({ json: h })));'),
+    append('Zapisz historię', [X(8), 0], 'Historia'),
+    code('Potwierdzenia', [X(7), 200], 'return $input.all().filter((i) => i.json.reply).map((i) => ({ json: i.json.reply }));'),
+    waSend('Odpisz na WhatsApp', [X(8), 200], '$json.chatId', '$json.message'),
+  ], {
+    'Co minutę': { main: [[to('Konfiguracja')]] },
+    'Test ręczny': { main: [[to('Konfiguracja')]] },
+    ...chain('Konfiguracja', 'Pobierz wiadomości', 'Pobierz wysłane', 'Pobierz leady', 'Pobierz handlowców', 'Przetwórz odpowiedzi'),
+    'Przetwórz odpowiedzi': { main: [[to('Aktualizacje'), to('Wpisy historii'), to('Potwierdzenia')]] },
+    'Aktualizacje': { main: [[to('Aktualizuj lead')]] },
+    'Wpisy historii': { main: [[to('Zapisz historię')]] },
+    'Potwierdzenia': { main: [[to('Odpisz na WhatsApp')]] },
+  });
+
+  return { 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D };
 }
 
 function write(dir, cfg) {

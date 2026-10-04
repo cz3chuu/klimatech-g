@@ -5,6 +5,6 @@ return $('Sprawdź SLA').all().map((i) => ({
     czas: i.json.aktualizacja,
     lead_id: i.json.lead_id,
     zdarzenie: 'sla',
-    szczegoly: `${opis[i.json.sla_poziom]}; czeka ${i.json._sla.minuty} min roboczych; mail do ${i.json._sla.do.email}`,
+    szczegoly: `${opis[i.json.sla_poziom]}; czeka ${i.json._sla.minuty} min roboczych; powiadomienie do ${i.json._sla.do.nazwa}`,
   },
 }));
