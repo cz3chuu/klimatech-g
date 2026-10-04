@@ -13,9 +13,9 @@ export const KOLUMNY_LEADY = [
   'lead_id', 'data_zgloszenia', 'zrodlo', 'firma', 'osoba', 'email', 'telefon', 'miasto', 'wojewodztwo',
   'zainteresowanie', 'szac_wartosc_pln', 'wiadomosc', 'telefon_norm', 'firma_klucz', 'wojewodztwo_zrodlo',
   'routing', 'handlowiec_id', 'handlowiec', 'duplikat_of', 'duplikat_typ', 'duplikat_powod', 'status',
-  'pierwszy_kontakt', 'kontakt_kto', 'proby', 'sla_poziom', 'token', 'aktualizacja',
+  'pierwszy_kontakt', 'kontakt_kto', 'proby', 'sla_poziom', 'token', 'aktualizacja', 'notatka',
 ];
-export const KOLUMNY_HISTORIA = ['czas', 'lead_id', 'zdarzenie', 'szczegoly'];
+export const KOLUMNY_HISTORIA = ['czas', 'lead_id', 'zdarzenie', 'kto', 'szczegoly'];
 
 export function parseCsv(text) {
   const rows = []; let row = [], field = '', q = false;
@@ -58,8 +58,13 @@ export function importLeads(leadyRaw, handlowcy, now) {
     if (row.status === 'nowy' && row.duplikat_typ !== 'pewny') row.sla_poziom = core.slaLevel(core.businessMinutes(row.data_zgloszenia, now));
     row.aktualizacja = now;
     out.push(row);
-    historia.push({ czas: row.data_zgloszenia, lead_id: row.lead_id, zdarzenie: 'import', szczegoly: `z arkusza biura; ${row.routing}${dup ? `; ${dup.typ} duplikat ${dup.original.lead_id} (${dup.powod})` : ''}` });
+    historia.push({ czas: row.data_zgloszenia, lead_id: row.lead_id, zdarzenie: 'import', kto: 'Ania (biuro)', szczegoly: `z arkusza biura; ${row.routing}${dup ? `; ${dup.typ} duplikat ${dup.original.lead_id} (${dup.powod})` : ''}` });
   }
+  // Kontakty z arkusza biura jako wpisy historii – oś czasu w CRM od pierwszego dnia
+  out.filter((r) => r.pierwszy_kontakt).forEach((r) => historia.push({
+    czas: r.pierwszy_kontakt, lead_id: r.lead_id, zdarzenie: 'status', kto: r.handlowiec || 'biuro', szczegoly: 'Dodzwoniono się (wpis z arkusza biura)',
+  }));
+  historia.sort((a, b) => a.czas.localeCompare(b.czas));
   return { rows: out.sort((a, b) => a.lead_id.localeCompare(b.lead_id)), historia };
 }
 

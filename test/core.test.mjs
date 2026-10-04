@@ -142,12 +142,12 @@ test('WA: ponowienie -> 🆔 leada pierwotnego', () => {
   assert.match(r.whatsapp.message, /🆔 L-007 \(nowe zgłoszenie: L-041\)/);
 });
 test('WA: rozpoznawanie odpowiedzi', () => {
-  assert.deepEqual(core.parseWaReply('1', 'NOWY LEAD\n🆔 L-041\n1 = ...'), { status: 'dodzwoniono', lead_id: 'L-041', wiele: false });
+  assert.deepEqual(core.parseWaReply('1', 'NOWY LEAD\n🆔 L-041\n1 = ...'), { status: 'dodzwoniono', lead_id: 'L-041', wiele: false, notatka: '' });
   assert.equal(core.parseWaReply('L-7 3', '').lead_id, 'L-007');
   assert.equal(core.parseWaReply('L-007 3', '').status, 'umowione');
   assert.equal(core.parseWaReply('nie odebrał', '').status, 'nie_odebral');
   assert.equal(core.parseWaReply('Dodzwoniłem się, oddzwoni w piątek', '').status, 'dodzwoniono');
-  assert.deepEqual(core.parseWaReply('2', '🆔 L-035\n\n🆔 L-036'), { status: 'nie_odebral', lead_id: '', wiele: true }); // zbiorcze -> podaj numer
+  assert.deepEqual(core.parseWaReply('2', '🆔 L-035\n\n🆔 L-036'), { status: 'nie_odebral', lead_id: '', wiele: true, notatka: '' }); // zbiorcze -> podaj numer
   assert.equal(core.parseWaReply('L-036 2', '🆔 L-035\n\n🆔 L-036').lead_id, 'L-036');
 });
 test('WA: odpowiedź z cytatem zapisuje status, potwierdza i loguje id wiadomości', () => {
@@ -193,4 +193,19 @@ test('WA: makieta na jednym telefonie – odpowiedź w czacie „Ty” działa, 
   assert.equal(core.processWaReplies([own('1', '🆔 L-005', true)], rows, handlowcy, c1, 'x').length, 0);
   assert.equal(core.processWaReplies([own('✅ Zapisano: L-005 Hydro-Max – Dodzwoniono się.', '', false)], rows, handlowcy, c1, 'x').length, 0);
   assert.equal(core.processWaReplies([own('1', '🆔 L-005', false)], rows, handlowcy, cfgWa, 'x').length, 0); // tryb dwóch telefonów: ignoruj
+});
+test('CRM: notatka z odpowiedzi trafia do arkusza i historii z nazwiskiem', () => {
+  assert.equal(core.parseWaReply('1 chce ofertę na 10 szt., oddzwonić w piątek', '🆔 L-005').notatka, 'chce ofertę na 10 szt., oddzwonić w piątek');
+  assert.equal(core.parseWaReply('nie odebrał', '').notatka, '');
+  const out = core.processWaReplies([msg('3 spotkanie wtorek 10:00', '🆔 L-005')], rows, handlowcy, cfgWa, '2026-10-05 10:00')[0];
+  assert.equal(out.update.notatka, 'spotkanie wtorek 10:00');
+  assert.equal(out.historia[0].kto, 'Bartosz Zając');
+  assert.match(out.historia[0].szczegoly, /Umówione spotkanie \(WhatsApp\) – „spotkanie wtorek 10:00”/);
+});
+test('CRM: znany klient – w powiadomieniu ostatnia notatka i kto rozmawiał', () => {
+  const zNotatka = rows.map((r) => (r.lead_id === 'L-004' ? { ...r, notatka: 'wycena 12 domów, rabat 8%' } : r));
+  const r = core.processInquiry({ firma: 'Ekoterm', telefon: '+48604777321' }, zNotatka, handlowcy, cfgWa, '2026-10-05 09:00');
+  assert.match(r.whatsapp.message, /Piotr Nowak/);
+  assert.match(r.whatsapp.message, /📝 „wycena 12 domów, rabat 8%”/);
+  assert.match(r.email.html, /Ostatnia notatka/);
 });

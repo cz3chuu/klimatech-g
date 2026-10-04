@@ -311,11 +311,16 @@ function parseWaReply(text, quoted) {
   // 🆔 oznacza leada, którego dotyczy wiadomość; kilka 🆔 = zbiorcze przypomnienie -> trzeba podać numer
   const ids = [...new Set([...q.matchAll(/🆔\s*(L-\d+)/g)].map((x) => x[1]))];
   const lead_id = idTxt ? 'L-' + idTxt.padStart(3, '0') : ids.length === 1 ? ids[0] : '';
-  return { status, lead_id, wiele: !idTxt && ids.length > 1 };
+  // Notatka: wszystko po cyfrze statusu (i numerze leada), np. "1 chce ofertę na 10 szt." -> "chce ofertę na 10 szt."
+  const oryg = String(text ?? '').trim();
+  const notatka = cyfra
+    ? oryg.replace(/\bl-?\s?\d{1,4}\b/i, ' ').replace(/(^|\s)[1-4](?=\s|$|[.!,])[.!,]?/, ' ').replace(/^[\s,.;:–-]+/, '').replace(/\s+/g, ' ').trim()
+    : status && oryg.length > 20 ? oryg : ''; // samo "nie odebrał" to nie notatka
+  return { status, lead_id, wiele: !idTxt && ids.length > 1, notatka };
 }
 
 // Wspólne dla kliknięcia linku (B) i odpowiedzi z WhatsAppa (D)
-function applyStatus(row, s, kto, now, zrodlo) {
+function applyStatus(row, s, kto, now, zrodlo, opts = {}) {
   const zamyka = STATUSY_ZAMYKAJACE_SLA.includes(s);
   const pierwszy = zamyka && !row.pierwszy_kontakt;
   const update = { lead_id: row.lead_id, status: s, proby: (Number(row.proby) || 0) + 1, aktualizacja: now };
@@ -323,11 +328,13 @@ function applyStatus(row, s, kto, now, zrodlo) {
     update.pierwszy_kontakt = now;
     update.kontakt_kto = kto || row.handlowiec_id || '';
   }
+  if (opts.notatka) update.notatka = opts.notatka;
+  const ktoNazwa = opts.ktoNazwa || kto || '—';
   const czasMin = pierwszy ? businessMinutes(row.data_zgloszenia, now) : null;
   return {
     update,
     czas: czasMin === null ? '' : `${fmtGodziny(czasMin)} roboczych`,
-    historia: [{ czas: now, lead_id: row.lead_id, zdarzenie: 'status', szczegoly: `${s} (${zrodlo}: ${kto || '—'})` }],
+    historia: [{ czas: now, lead_id: row.lead_id, zdarzenie: 'status', kto: ktoNazwa, szczegoly: `${STATUS_ETYKIETY[s] || s} (${zrodlo})${opts.notatka ? ` – „${opts.notatka}”` : ''}` }],
   };
 }
 
@@ -375,17 +382,18 @@ function processWaReplies(messages, rows, handlowcyRows, cfg, now) {
     const row = rows.find((r) => r.lead_id === lead_id);
     if (!row) { out.push({ ...base, reply: reply(`❓ Nie znalazłem leada ${lead_id}.`) }); continue; }
     const kto = nadawcaH ? nadawcaH.handlowiec_id : marek ? 'MAREK' : ania ? 'ANIA' : (row.handlowiec_id || 'TEST');
+    const ktoNazwa = nadawcaH ? nadawcaH.imie_nazwisko : marek ? 'Marek' : ania ? 'Ania (biuro)' : (row.handlowiec || 'Ania (biuro)');
     if (nadawcaH && row.handlowiec_id !== nadawcaH.handlowiec_id) {
       out.push({ ...base, reply: reply(`⛔ ${lead_id} nie jest Twoim leadem – nic nie zmieniłem.`) });
       continue;
     }
-    const r = applyStatus(row, p.status, kto, now, 'WhatsApp');
+    const r = applyStatus(row, p.status, kto, now, 'WhatsApp', { notatka: p.notatka, ktoNazwa });
     const ikona = { dodzwoniono: '✅', nie_odebral: '📵', umowione: '📅', niezainteresowany: '✖' }[p.status];
     const dopisek = p.status === 'nie_odebral' ? ` To ${r.update.proby}. próba – lead dalej czeka, przypomnę.` : r.czas ? ` Czas do kontaktu: ${r.czas}.` : '';
     out.push({
       ...base, lead_id, update: r.update,
       historia: r.historia.map((h) => ({ ...h, szczegoly: `${h.szczegoly}; wa:${m.idMessage}` })),
-      reply: reply(`${ikona} Zapisano: ${lead_id} ${row.firma || row.osoba} – ${STATUS_ETYKIETY[p.status]}.${dopisek}`),
+      reply: reply(`${ikona} Zapisano: ${lead_id} ${row.firma || row.osoba} – ${STATUS_ETYKIETY[p.status]}.${dopisek}${p.notatka ? `\n📝 Notatka: „${p.notatka}”` : '\n📝 Możesz dopisać notatkę, np. „1 chce ofertę na 10 szt.”'}`),
     });
   }
   return out;
@@ -470,10 +478,12 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   let subject, intro, waNaglowek, waInfo = '';
   if (pewny && oryginalZamkniety) {
     waNaglowek = '♻️ *ZNANY KLIENT pisze ponownie*';
-    waInfo = `Był już kontakt (${original.lead_id}, ${STATUS_ETYKIETY[original.status] || original.status}${original.pierwszy_kontakt ? ', ' + original.pierwszy_kontakt : ''}). Sprawdź ustalenia, zanim podasz cenę.`;
+    waInfo = `Był już kontakt (${original.lead_id}, ${STATUS_ETYKIETY[original.status] || original.status}${original.pierwszy_kontakt ? ', ' + original.pierwszy_kontakt : ''}${original.handlowiec ? ', ' + original.handlowiec : ''}).` +
+      `${original.notatka ? `\n📝 „${skroc(original.notatka, 200)}”` : ''}\nSprawdź ustalenia, zanim podasz cenę.`;
     subject = `Znany klient pisze ponownie: ${opis}`;
     intro = `Ten klient był już obsłużony: ${original.lead_id} z ${original.data_zgloszenia}, status <b>${STATUS_ETYKIETY[original.status] || original.status}</b>` +
       `${original.pierwszy_kontakt ? `, kontakt ${original.pierwszy_kontakt}` : ''}${original.kontakt_kto ? ` (${esc(original.kontakt_kto)})` : ''}. ` +
+      (original.notatka ? `Ostatnia notatka: „${esc(original.notatka)}”. ` : '') +
       'Zanim zadzwonisz, sprawdź ustalenia z poprzedniej rozmowy, żeby nie podać innej ceny.';
   } else if (pewny) {
     waNaglowek = '⚠️ *PONOWIENIE – klient czeka*';
@@ -518,12 +528,12 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
     : null;
 
   const historia = [
-    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})` },
+    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: row.zrodlo === 'formularz' ? 'formularz WWW' : 'Ania (biuro)', szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})` },
   ];
-  if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
-  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
-  if (String(cfg.KANAL || 'mail') !== 'whatsapp') historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
-  if (whatsapp) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `WhatsApp do ${odbiorca.nazwa}` });
+  if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', kto: 'system', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
+  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
+  if (String(cfg.KANAL || 'mail') !== 'whatsapp') historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
+  if (whatsapp) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `WhatsApp do ${odbiorca.nazwa}` });
 
   return {
     valid: true,
@@ -557,7 +567,8 @@ function applyStatusClick(query, rows, now) {
   if (!q.t || String(row.token) !== String(q.t)) return { ok: false, html: page('Nieprawidłowy link', 'Link jest niepoprawny lub nieaktualny.', 'err') };
   if (!STATUSY.includes(q.s) || q.s === 'nowy') return { ok: false, html: page('Nieznany status', esc(q.s), 'err') };
 
-  const r = applyStatus(row, q.s, q.kto, now, 'kliknął');
+  const ktoNazwa = q.kto === row.handlowiec_id ? row.handlowiec : { MAREK: 'Marek', ANIA: 'Ania (biuro)' }[q.kto] || q.kto;
+  const r = applyStatus(row, q.s, q.kto, now, 'link w mailu', { ktoNazwa });
   const czas = r.czas ? ` Czas do kontaktu: ${r.czas}.` : '';
   return {
     ok: true,
@@ -645,6 +656,7 @@ return $('Sprawdź SLA').all().map((i) => ({
     czas: i.json.aktualizacja,
     lead_id: i.json.lead_id,
     zdarzenie: 'sla',
+    kto: 'system',
     szczegoly: `${opis[i.json.sla_poziom]}; czeka ${i.json._sla.minuty} min roboczych; powiadomienie do ${i.json._sla.do.nazwa}`,
   },
 }));
