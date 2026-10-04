@@ -2,7 +2,7 @@
 
 Makieta systemu, który pilnuje, żeby **każde zapytanie od instalatora trafiło do właściwego handlowca i dostało telefon w ciągu doby roboczej**. Powstała jako zadanie rekrutacyjne na podstawie maila od klienta (Marek, właściciel hurtowni pomp ciepła) i eksportu jego arkusza leadów.
 
-Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy nim bez rozmowy z autorem. Propozycja dla klienta (koszty, czego od niego potrzebujemy): [docs/propozycja-dla-klienta.md](docs/propozycja-dla-klienta.md). Liczby z danych klienta: [docs/raport.md](docs/raport.md).
+Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy nim bez rozmowy z autorem. Propozycja dla klienta (koszty, czego od niego potrzebujemy): [docs/propozycja-dla-klienta.md](docs/propozycja-dla-klienta.md). Liczby z danych klienta są w propozycji (sekcja 1); pełne zestawienie generuje `npm run import`.
 
 ---
 
