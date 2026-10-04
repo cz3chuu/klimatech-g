@@ -774,13 +774,58 @@ function groupSlaWhatsapp(items, cfg) {
   }).filter(Boolean);
 }
 
-// === Węzeł Code: "Przetwórz lead" (workflow H – Formularz klienta (makieta strony), tryb: Run Once for All Items) ===
-// Ten sam rdzeń co formularz WWW; dodatkowo strona dla klienta z numerem, na który oddzwonimy.
-const cfg = $('Konfiguracja').first().json;
-const body = $('Zgłoszenie').first().json || {};
-const existing = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
-const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);
+// ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------
+// Jeden przebieg, jeden stan: skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
+// Kolejne kroki widzą zmiany poprzednich (np. lead ze skrzynki potwierdzony w tej samej minucie).
+const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po SLA (1 dzień)', 3: 'eskalacja do Marka (2 dni)' };
+function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false }) {
+  const out = { nowe_leady: [], aktualizacje: [], historia: [], emaile: [], whatsapp: [], wyniki: [] };
+  const mail = String(cfg.KANAL || 'mail') !== 'whatsapp';
 
-const wynik = processInquiry(body, existing, handlowcy, cfg, nowWarsaw());
-wynik.strona = klientPage(wynik, cfg.FORM_KLIENT_URL || "/form/klimatech");
+  // 1. Skrzynka „Wpisz lead”
+  const inbox = processInbox(wpisy, rows, handlowcy, cfg, now);
+  out.nowe_leady.push(...inbox.leady);
+  out.historia.push(...inbox.historia);
+  out.wyniki.push(...inbox.wyniki);
+  if (mail) out.emaile.push(...inbox.emaile);
+  out.whatsapp.push(...inbox.whatsapp);
+  let stan = [...rows, ...inbox.leady];
+
+  // 2. Odpowiedzi handlowców z WhatsAppa
+  const zmiany = {};
+  const zmien = (id, z) => {
+    zmiany[id] = { ...(zmiany[id] || { lead_id: id }), ...z };
+    stan = stan.map((r) => (r.lead_id === id ? { ...r, ...z } : r));
+  };
+  for (const w of processWaReplies(wiadomosci, stan, handlowcy, cfg, now)) {
+    if (w.update) zmien(w.lead_id, w.update);
+    if (w.historia) out.historia.push(...w.historia);
+    if (w.reply) out.whatsapp.push(w.reply);
+  }
+
+  // 3. SLA: przypomnienia i eskalacje
+  if (sla) {
+    const items = checkSla(stan, handlowcy, cfg, now);
+    items.forEach((it) => {
+      zmien(it.lead_id, { sla_poziom: it.poziom, aktualizacja: now });
+      out.historia.push({ czas: now, lead_id: it.lead_id, zdarzenie: 'sla', kto: 'system',
+        szczegoly: `${SLA_HISTORIA[it.poziom]}; czeka ${it.minuty} min roboczych; powiadomienie do ${it.do.nazwa}` });
+    });
+    if (mail) out.emaile.push(...groupSlaEmails(items, cfg));
+    out.whatsapp.push(...groupSlaWhatsapp(items, cfg));
+  }
+
+  // Zmiany leadów dodanych w tym przebiegu trafiają od razu do nowego wiersza (jeszcze go nie ma w arkuszu)
+  out.nowe_leady = out.nowe_leady.map((r) => (zmiany[r.lead_id] ? { ...r, ...zmiany[r.lead_id] } : r));
+  out.nowe_leady.forEach((r) => { delete zmiany[r.lead_id]; });
+  out.aktualizacje = Object.values(zmiany);
+  out.cokolwiek = Object.values(out).some((v) => Array.isArray(v) && v.length > 0);
+  return out;
+}
+
+// === Węzeł Code: "Ustaw status" (workflow 3 – Status z linku, tryb: Run Once for All Items) ===
+const query = $('Webhook').first().json.query || {};
+const rows = $('Pobierz lead').all().map((i) => i.json).filter((r) => r.lead_id);
+
+const wynik = applyStatusClick(query, rows, nowWarsaw());
 return [{ json: wynik }];

@@ -1,4 +1,4 @@
-// === Węzeł Code: "Przygotuj dane" (workflow E, tryb: Run Once for All Items) ===
+// === Węzeł Code: "Przygotuj dane" (workflow 4 – Synchronizacja z CRM, tryb: Run Once for All Items) ===
 // Arkusz -> Supabase. Zwraca 3 paczki (handlowcy, leady, historia) do wysłania jako upsert przez REST API.
 const now = nowWarsaw();
 const tekst = (v) => (v === '' || v === undefined || v === null ? null : String(v));

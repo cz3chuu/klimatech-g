@@ -1,9 +1,13 @@
-// Generuje gotowe do importu workflow n8n (A–G) z kodem z n8n/dist/.
+// Generuje gotowe do importu workflow n8n z kodem z n8n/dist/. Cztery workflow, każdy z jednym zadaniem:
+//   1. Przyjęcie leada      – webhook strony WWW, formularz klienta, formularz biura -> rdzeń -> arkusz -> WhatsApp/mail
+//   2. Obsługa co minutę    – skrzynka „Wpisz lead”, odpowiedzi z WhatsAppa, SLA i eskalacje (co 15 min)
+//   3. Status z linku       – klik w przycisk w mailu (Marek, Ania)
+//   4. Synchronizacja z CRM – arkusz -> Supabase (osobno: awaria CRM nie zatrzymuje leadów)
 // Użycie: node scripts/build-workflows.mjs
-//  - zawsze:                       n8n/workflows/*.json        (szablon do repo, wartości przykładowe)
+//  - zawsze:                           n8n/workflows/*.json        (szablon do repo, wartości przykładowe)
 //  - jeśli jest n8n/config.local.json: n8n/workflows.local/*.json (Twoje ID arkusza, credentials, adresy) – w .gitignore
 // Import: n8n UI → Workflows → Import from File, albo CLI: n8n import:workflow --input=plik.json
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 
 const dist = (f) => readFileSync(`n8n/dist/${f}`, 'utf8');
 
@@ -11,10 +15,11 @@ const PRZYKLAD = {
   SHEET_ID: 'WKLEJ_ID_ARKUSZA',
   SHEETS_CRED: { id: '', name: 'Google Sheets account' },
   GMAIL_CRED: { id: '', name: 'Gmail account' },
+  SUPABASE_CRED: { id: '', name: 'Supabase – klucz secret' }, // credential typu Custom Auth z nagłówkiem apikey
   MAREK_EMAIL: 'marek@klimatech.example',
   ANIA_EMAIL: 'biuro@klimatech.example',
   TEST_INBOX: 'twoj.mail+klimatech@gmail.com',
-  TRYB_TESTOWY: 'true',
+  TRYB_TESTOWY: 'true', // true = wszystkie maile i WhatsAppy idą na TEST_INBOX / TEST_WHATSAPP
   N8N_URL: 'http://localhost:5678',
   KANAL: 'oba', // mail | whatsapp | oba
   TEST_WHATSAPP: '48600000000',
@@ -25,25 +30,22 @@ const PRZYKLAD = {
   MAREK_WHATSAPP: '',
   ANIA_WHATSAPP: '',
   SUPABASE_URL: 'https://TWOJ-PROJEKT.supabase.co',
-  // adres formularza biura (przycisk „Wpisz kolejny lead”)
-  SUPABASE_CRED: { id: '', name: 'Supabase – klucz secret' }, // credential typu Custom Auth (nagłówki apikey/Authorization)
 };
 
-// Kod małych węzłów (bez rdzenia)
-const ZGLOSZENIE = `// Ujednolica wejście: formularz n8n (etykiety pól) albo webhook (JSON w body – np. wtyczka WordPress)
+// Węzeł „Zgłoszenie”: ujednolica trzy wejścia do jednego kształtu danych i zapisuje, skąd przyszło (_wejscie)
+const ZGLOSZENIE = `// Webhook strony (JSON w body) | formularz klienta | formularz biura (etykiety pól) -> jeden kształt danych
 const j = $input.first().json;
-if (j.body && typeof j.body === 'object') return [{ json: j.body }];
-if (typeof j.body === 'string') { try { return [{ json: JSON.parse(j.body) }]; } catch (e) { return [{ json: {} }]; } }
+if (j.body && typeof j.body === 'object') return [{ json: { ...j.body, _wejscie: 'webhook' } }];
+if (typeof j.body === 'string') { try { return [{ json: { ...JSON.parse(j.body), _wejscie: 'webhook' } }]; } catch (e) { return [{ json: { _wejscie: 'webhook' } }]; } }
 const POLA = {
-  'Firma': 'firma', 'Osoba kontaktowa': 'osoba', 'E-mail': 'email', 'Telefon': 'telefon', 'Miasto': 'miasto',
-  'Województwo': 'wojewodztwo', 'Zainteresowanie': 'zainteresowanie', 'Szacowana wartość (zł)': 'szac_wartosc_pln',
-  'Wiadomość': 'wiadomosc', 'Źródło zgłoszenia': 'zrodlo',
-  // Formularz biura
-  'Źródło': 'zrodlo', 'Treść zapytania / notatka z rozmowy': 'wiadomosc', 'Kto wpisuje': 'wprowadzil',
-  // Formularz klienta
+  'Firma': 'firma', 'E-mail': 'email', 'Telefon': 'telefon', 'Miasto': 'miasto', 'Województwo': 'wojewodztwo', 'Wiadomość': 'wiadomosc',
+  // formularz klienta
   'Imię i nazwisko': 'osoba', 'Czym jesteś zainteresowany?': 'zainteresowanie', 'Orientacyjna wartość zamówienia (zł)': 'szac_wartosc_pln', 'Zgoda': 'zgoda',
+  // formularz biura
+  'Źródło': 'zrodlo', 'Osoba kontaktowa': 'osoba', 'Zainteresowanie': 'zainteresowanie', 'Szacowana wartość (zł)': 'szac_wartosc_pln',
+  'Treść zapytania / notatka z rozmowy': 'wiadomosc', 'Kto wpisuje': 'wprowadzil',
 };
-const out = {};
+const out = { _wejscie: j['Kto wpisuje'] ? 'biuro' : 'klient' };
 for (const [etykieta, pole] of Object.entries(POLA)) if (j[etykieta] !== undefined && j[etykieta] !== '') out[pole] = j[etykieta];
 if (['(nie wiem)', '(ustal z miasta)'].includes(out.wojewodztwo)) delete out.wojewodztwo;
 // pola wielokrotnego wyboru przychodzą jako lista
@@ -56,7 +58,7 @@ const dk = String(j['Data kontaktu'] || '').slice(0, 10), gk = String(j['Godzina
 if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dk)) out.data_kontaktu = dk + ' ' + (/^[0-9]{1,2}:[0-9]{2}$/.test(gk) ? gk.padStart(5, '0') : '08:00');
 return [{ json: out }];`;
 
-const WOJ = ['(nie wiem)', 'dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
+const WOJ = ['dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
   'podkarpackie', 'podlaskie', 'pomorskie', 'śląskie', 'świętokrzyskie', 'warmińsko-mazurskie', 'wielkopolskie', 'zachodniopomorskie'];
 
 function build(c) {
@@ -66,46 +68,46 @@ function build(c) {
   const gmailCred = c.GMAIL_CRED.id ? { gmailOAuth2: c.GMAIL_CRED } : undefined;
   const supaCred = c.SUPABASE_CRED.id ? { httpCustomAuth: c.SUPABASE_CRED } : undefined;
 
+  // ---------- klocki ----------
   const node = (name, type, typeVersion, position, parameters, extra = {}) =>
     ({ id: uid('a1b2c3d4'), name, type, typeVersion, position, parameters, ...extra });
   const code = (name, pos, jsCode, extra) => node(name, 'n8n-nodes-base.code', 2, pos, { jsCode }, extra);
   const sheet = (tab) => ({ __rl: true, value: tab, mode: 'name' });
   const doc = { __rl: true, value: c.SHEET_ID, mode: 'id' };
-  const getRows = (name, pos, tab) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos,
+  const getRows = (name, pos, tab, extra = {}) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos,
     { authentication: 'oAuth2', resource: 'sheet', operation: 'read', documentId: doc, sheetName: sheet(tab), options: {} },
-    { executeOnce: true, alwaysOutputData: true, credentials: sheetsCred });
-  const append = (name, pos, tab) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos,
-    {
-      authentication: 'oAuth2', resource: 'sheet', operation: 'append', documentId: doc, sheetName: sheet(tab),
-      columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
-      options: { cellFormat: 'RAW' },
-    }, { credentials: sheetsCred });
-  const update = (name, pos) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos,
-    {
-      authentication: 'oAuth2', resource: 'sheet', operation: 'update', documentId: doc, sheetName: sheet('Leady'),
-      columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: ['lead_id'], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
-      options: { cellFormat: 'RAW' },
-    }, { credentials: sheetsCred });
+    { executeOnce: true, alwaysOutputData: true, credentials: sheetsCred, ...extra });
+  const append = (name, pos, tab) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos, {
+    authentication: 'oAuth2', resource: 'sheet', operation: 'append', documentId: doc, sheetName: sheet(tab),
+    columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
+    options: { cellFormat: 'RAW' },
+  }, { credentials: sheetsCred });
+  const update = (name, pos, tab = 'Leady', klucz = 'lead_id') => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos, {
+    authentication: 'oAuth2', resource: 'sheet', operation: 'update', documentId: doc, sheetName: sheet(tab),
+    columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [klucz], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
+    options: { cellFormat: 'RAW' },
+  }, { credentials: sheetsCred });
   const gmail = (name, pos, to, subject, message, extra = {}) => node(name, 'n8n-nodes-base.gmail', 2.1, pos,
     { resource: 'message', operation: 'send', sendTo: to, subject, emailType: 'html', message, options: { appendAttribution: false } },
-    { credentials: gmailCred, ...extra });
-  const ifTrue = (name, pos, expr) => node(name, 'n8n-nodes-base.if', 2.2, pos, {
+    { credentials: gmailCred, onError: 'continueRegularOutput', ...extra });
+  const ifTrue = (name, pos, expr, extra = {}) => node(name, 'n8n-nodes-base.if', 2.2, pos, {
     conditions: {
       options: { caseSensitive: true, leftValue: '', typeValidation: 'loose', version: 2 },
       conditions: [{ id: uid('c0ffee00'), leftValue: expr, rightValue: '', operator: { type: 'boolean', operation: 'true', singleValue: true } }],
       combinator: 'and',
     },
     options: {},
-  });
+  }, extra);
   const konfiguracja = (pos, extraFields = []) => node('Konfiguracja', 'n8n-nodes-base.set', 3.4, pos, {
     mode: 'manual',
     includeOtherFields: false,
     assignments: {
       assignments: [
-        ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX],
-        ['TRYB_TESTOWY', c.TRYB_TESTOWY], ['STATUS_URL', `${c.N8N_URL}/webhook/status`],
+        ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX], ['TRYB_TESTOWY', c.TRYB_TESTOWY],
+        ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
-        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE], ['SUPABASE_URL', c.SUPABASE_URL], ['FORM_BIURO_URL', `${c.N8N_URL}/form/biuro`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`], ...extraFields,
+        ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
+        ['SUPABASE_URL', c.SUPABASE_URL], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
@@ -116,57 +118,157 @@ function build(c) {
     method: 'POST', url: greenUrl('sendMessage'), sendBody: true, specifyBody: 'json',
     jsonBody: `={{ JSON.stringify({ chatId: ${chatIdExpr}, message: ${messageExpr} }) }}`, options: {},
   }, { onError: 'continueRegularOutput', ...extra });
-  const ifExpr = (name, pos, expr) => { const n = ifTrue(name, pos, expr); n.executeOnce = true; return n; };
+  const waGet = (name, pos, metoda) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos,
+    { method: 'GET', url: greenUrl(metoda, '?minutes=10'), options: {} },
+    { executeOnce: true, alwaysOutputData: true, onError: 'continueRegularOutput' }); // Green API niedostępne = brak wiadomości, reszta działa
+  const ifOnce = (name, pos, expr) => ifTrue(name, pos, expr, { executeOnce: true });
   const to = (name) => ({ node: name, type: 'main', index: 0 });
-  const chain = (...names) => Object.fromEntries(names.slice(0, -1).map((a, i) => [a, { main: [[{ node: names[i + 1], type: 'main', index: 0 }]] }]));
+  const chain = (...names) => Object.fromEntries(names.slice(0, -1).map((a, i) => [a, { main: [[to(names[i + 1])]] }]));
   const wf = (id, name, nodes, connections) => ({
     id, name, active: false, nodes, connections, settings: { executionOrder: 'v1', timezone: 'Europe/Warsaw' }, pinData: {},
   });
   const X = (i) => 220 * i;
+  const opcje = (a) => ({ values: a.map((option) => ({ option })) });
+  const trigger1min = () => [
+    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
+    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
+  ];
 
-  // ---------- A. Przyjęcie leada ----------
-  const A = wf('KlimatechWfA0001', 'Klimatech A – Webhook strony WWW', [
-    // Wejście ze strony WWW: wtyczka formularza WordPress wysyła JSON (makieta strony: workflow H)
-    node('Webhook', 'n8n-nodes-base.webhook', 2, [0, 0], {
-      httpMethod: 'POST', path: 'lead', responseMode: 'lastNode', responseData: 'firstEntryJson', options: { allowedOrigins: '*' },
+  // ======================================================================
+  // 1. PRZYJĘCIE LEADA – trzy wejścia, jeden rdzeń, odpowiedź zależna od wejścia
+  // ======================================================================
+  const PL = "$('Przetwórz lead').first().json";
+  const W1 = wf('KlimatechWfA0001', 'Klimatech 1 – Przyjęcie leada', [
+    // Produkcja: wtyczka formularza WordPress wysyła JSON na /webhook/lead
+    node('Webhook strony WWW', 'n8n-nodes-base.webhook', 2, [0, -220], {
+      httpMethod: 'POST', path: 'lead', responseMode: 'responseNode', options: { allowedOrigins: '*' },
     }, { webhookId: uid('e0e0e0e0') }),
+    // Makieta formularza ze strony – dla klientów
+    node('Formularz klienta', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
+      formTitle: 'Zapytanie ofertowe – Klimatech',
+      formDescription: 'Pompy ciepła, klimatyzacja i rekuperacja dla instalatorów i inwestorów. Zostaw kontakt – doradca z Twojego województwa oddzwoni najpóźniej w ciągu jednego dnia roboczego (pn–pt 8–16).',
+      formFields: {
+        values: [
+          { fieldLabel: 'Firma', placeholder: 'np. Instal-Tech Kowalczyk', requiredField: true },
+          { fieldLabel: 'Imię i nazwisko', requiredField: true },
+          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333', requiredField: true },
+          { fieldLabel: 'E-mail', fieldType: 'email', placeholder: 'opcjonalnie' },
+          { fieldLabel: 'Miasto', requiredField: true },
+          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(['(nie wiem)', ...WOJ]), requiredField: true },
+          { fieldLabel: 'Czym jesteś zainteresowany?', fieldType: 'checkbox', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja']), requiredField: true },
+          { fieldLabel: 'Kim jesteś?', fieldType: 'radio', fieldOptions: opcje(['instalator / firma instalacyjna', 'hurtownia', 'deweloper / inwestor', 'klient indywidualny']) },
+          { fieldLabel: 'Orientacyjna wartość zamówienia (zł)', fieldType: 'number', placeholder: 'opcjonalnie' },
+          { fieldLabel: 'Wiadomość', fieldType: 'textarea', placeholder: 'np. ile urządzeń, na kiedy, jaki obiekt' },
+          { fieldLabel: 'Zgoda', fieldType: 'checkbox', fieldOptions: opcje(['Zgadzam się na kontakt telefoniczny i mailowy w sprawie tego zapytania. Administratorem danych jest Klimatech.']), requiredField: true },
+        ],
+      },
+      responseMode: 'lastNode',
+      options: { appendAttribution: false, buttonLabel: 'Wyślij zapytanie', path: 'klimatech' },
+    }, { webhookId: uid('f0f0f0f0') }),
+    // Propozycja dla biura – alternatywa dla wpisywania w arkusz
+    node('Formularz biura', 'n8n-nodes-base.formTrigger', 2.2, [0, 220], {
+      formTitle: 'Klimatech – wpisz lead (biuro)',
+      formDescription: 'Dla zapytań z telefonu, maila, targów i poleceń. Lead trafi do handlowca z województwa tak samo jak z formularza na stronie. Podaj telefon albo e-mail.',
+      formFields: {
+        values: [
+          { fieldLabel: 'Źródło', fieldType: 'dropdown', fieldOptions: opcje(['telefon', 'mail', 'targi', 'polecenie', 'inne']), requiredField: true },
+          { fieldLabel: 'Firma' },
+          { fieldLabel: 'Osoba kontaktowa' },
+          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333 – dowolny format' },
+          { fieldLabel: 'E-mail', fieldType: 'email' },
+          { fieldLabel: 'Miasto' },
+          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(['(ustal z miasta)', ...WOJ]) },
+          { fieldLabel: 'Zainteresowanie', fieldType: 'dropdown', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja', 'inne']), requiredField: true },
+          { fieldLabel: 'Szacowana wartość (zł)', fieldType: 'number' },
+          { fieldLabel: 'Treść zapytania / notatka z rozmowy', fieldType: 'textarea' },
+          { fieldLabel: 'Data kontaktu', fieldType: 'date' },
+          { fieldLabel: 'Godzina kontaktu', placeholder: 'np. 09:10 – puste pola daty i godziny = teraz' },
+          { fieldLabel: 'Kto wpisuje', fieldType: 'dropdown', fieldOptions: opcje(['Ania (biuro)', 'Marek', 'inna osoba']), requiredField: true },
+        ],
+      },
+      responseMode: 'lastNode',
+      options: { appendAttribution: false, buttonLabel: 'Zapisz i przekaż handlowcowi', path: 'biuro' },
+    }, { webhookId: uid('b10b10b1') }),
     code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
     konfiguracja([X(2), 0]),
     getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(4), 0], 'Leady'),
-    code('Przetwórz lead', [X(5), 0], dist('A-przetworz-lead.js')),
-    ifTrue('Czy poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
-    code('Wiersz do zapisu', [X(7), -100], "return [{ json: $('Przetwórz lead').first().json.row }];"),
-    append('Zapisz lead', [X(8), -100], 'Leady'),
-    code('Historia', [X(9), -100], "return $('Przetwórz lead').first().json.historia.map((h) => ({ json: h }));"),
-    append('Zapisz historię', [X(10), -100], 'Historia'),
-    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
-    gmail('Wyślij mail', [X(12), -200], "={{ $('Przetwórz lead').first().json.email.to }}",
-      "={{ $('Przetwórz lead').first().json.email.subject }}", "={{ $('Przetwórz lead').first().json.email.html }}", { executeOnce: true, onError: 'continueRegularOutput' }),
-    ifExpr('WhatsApp?', [X(13), -100], "={{ !!$('Przetwórz lead').first().json.whatsapp }}"),
-    waSend('Wyślij WhatsApp', [X(14), -200], "$('Przetwórz lead').first().json.whatsapp.chatId", "$('Przetwórz lead').first().json.whatsapp.message", { executeOnce: true }),
-    code('Odpowiedź', [X(15), -100], "// Odpowiedź dla webhooka (JSON z lead_id, routingiem, duplikatem)\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
-    code('Błąd walidacji', [X(7), 100], "// Nic nie zapisujemy – zwracamy listę błędów\nreturn [{ json: $('Przetwórz lead').first().json.response }];"),
+    code('Przetwórz lead', [X(5), 0], dist('1-przyjecie-leada.js')),
+    ifTrue('Nowy i poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
+    code('Wiersz do zapisu', [X(7), -120], `return [{ json: ${PL}.row }];`),
+    append('Zapisz lead', [X(8), -120], 'Leady'),
+    code('Historia', [X(9), -120], `return ${PL}.historia.map((h) => ({ json: h }));`),
+    append('Zapisz historię', [X(10), -120], 'Historia'),
+    ifOnce('Mail?', [X(11), -120], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
+    gmail('Wyślij mail', [X(12), -240], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true }),
+    ifOnce('WhatsApp?', [X(13), -120], `={{ !!${PL}.whatsapp }}`),
+    waSend('Wyślij WhatsApp', [X(14), -240], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
+    // Odpowiedź: formularze -> strona wyniku; webhook -> JSON (200 / 400)
+    ifOnce('Z formularza?', [X(15), 0], `={{ ${PL}.wejscie !== 'webhook' }}`),
+    node('Strona wyniku', 'n8n-nodes-base.form', 1, [X(16), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
+    node('Odpowiedź JSON', 'n8n-nodes-base.respondToWebhook', 1.1, [X(16), 100], {
+      respondWith: 'json', responseBody: `={{ JSON.stringify(${PL}.response) }}`, options: { responseCode: `={{ ${PL}.valid ? 200 : 400 }}` },
+    }),
   ], {
-    Webhook: { main: [[{ node: 'Zgłoszenie', type: 'main', index: 0 }]] },
-    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Czy poprawny?'),
-    'Czy poprawny?': { main: [[{ node: 'Wiersz do zapisu', type: 'main', index: 0 }], [{ node: 'Błąd walidacji', type: 'main', index: 0 }]] },
+    'Webhook strony WWW': { main: [[to('Zgłoszenie')]] },
+    'Formularz klienta': { main: [[to('Zgłoszenie')]] },
+    'Formularz biura': { main: [[to('Zgłoszenie')]] },
+    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Nowy i poprawny?'),
+    // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, od razu odpowiedź
+    'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Z formularza?')]] },
     ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
     'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
     'Wyślij mail': { main: [[to('WhatsApp?')]] },
-    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Odpowiedź')]] },
-    'Wyślij WhatsApp': { main: [[to('Odpowiedź')]] },
+    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Z formularza?')]] },
+    'Wyślij WhatsApp': { main: [[to('Z formularza?')]] },
+    'Z formularza?': { main: [[to('Strona wyniku')], [to('Odpowiedź JSON')]] },
   });
 
-  // ---------- B. Status z maila ----------
+  // ======================================================================
+  // 2. OBSŁUGA CO MINUTĘ – jeden odczyt arkusza, jeden przebieg rdzenia, zapisy przed powiadomieniami
+  // ======================================================================
+  const OB = "$('Obsłuż').first().json";
+  const galaz = (nazwa, y, pole) => code(nazwa, [X(8), y], `return ${OB}.${pole}.map((x) => ({ json: x }));`);
+  const W2 = wf('KlimatechWfC0001', 'Klimatech 2 – Obsługa co minutę', [
+    ...trigger1min(),
+    konfiguracja([X(1), 0], [['TERAZ', '']]),
+    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
+    getRows('Pobierz leady', [X(3), 0], 'Leady'),
+    getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead', { onError: 'continueRegularOutput' }), // brak zakładki nie zatrzymuje SLA
+    waGet('Pobierz wiadomości', [X(5), 0], 'lastIncomingMessages'),
+    waGet('Pobierz wysłane', [X(6), 0], 'lastOutgoingMessages'),
+    code('Obsłuż', [X(7), 0], dist('2-obsluga-co-minute.js')),
+    // n8n wykonuje gałęzie od góry: najpierw zapisy w arkuszu, na końcu powiadomienia
+    galaz('Nowe leady', -375, 'nowe_leady'), append('Zapisz nowe leady', [X(9), -375], 'Leady'),
+    galaz('Zmiany leadów', -225, 'aktualizacje'), update('Aktualizuj leady', [X(9), -225]),
+    galaz('Wpisy historii', -75, 'historia'), append('Zapisz historię', [X(9), -75], 'Historia'),
+    galaz('Wyniki skrzynki', 75, 'wyniki'), update('Zapisz wynik w wierszu', [X(9), 75], 'Wpisz lead', 'row_number'),
+    galaz('Maile', 225, 'emaile'), gmail('Wyślij mail', [X(9), 225], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}'),
+    galaz('WhatsAppy', 375, 'whatsapp'), waSend('Wyślij WhatsApp', [X(9), 375], '$json.chatId', '$json.message'),
+  ], {
+    'Co minutę': { main: [[to('Konfiguracja')]] },
+    'Test ręczny': { main: [[to('Konfiguracja')]] },
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
+    'Obsłuż': { main: [[to('Nowe leady'), to('Zmiany leadów'), to('Wpisy historii'), to('Wyniki skrzynki'), to('Maile'), to('WhatsAppy')]] },
+    'Nowe leady': { main: [[to('Zapisz nowe leady')]] },
+    'Zmiany leadów': { main: [[to('Aktualizuj leady')]] },
+    'Wpisy historii': { main: [[to('Zapisz historię')]] },
+    'Wyniki skrzynki': { main: [[to('Zapisz wynik w wierszu')]] },
+    'Maile': { main: [[to('Wyślij mail')]] },
+    'WhatsAppy': { main: [[to('Wyślij WhatsApp')]] },
+  });
+
+  // ======================================================================
+  // 3. STATUS Z LINKU – klik w przycisk w mailu
+  // ======================================================================
   const page = (body, codeNum) => ({
     respondWith: 'text', responseBody: body,
     options: { responseCode: codeNum, responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }] } },
   });
-  const B = wf('KlimatechWfB0001', 'Klimatech B – Status z maila', [
-    node('Webhook', 'n8n-nodes-base.webhook', 2, [0, 0], { httpMethod: 'GET', path: 'status', responseMode: 'responseNode', options: {} }, { webhookId: uid('e1e1e1e1') }),
+  const W3 = wf('KlimatechWfB0001', 'Klimatech 3 – Status z linku w mailu', [
+    node('Klik w link', 'n8n-nodes-base.webhook', 2, [0, 0], { httpMethod: 'GET', path: 'status', responseMode: 'responseNode', options: {} }, { webhookId: uid('e1e1e1e1') }),
     getRows('Pobierz lead', [X(1), 0], 'Leady'),
-    code('Ustaw status', [X(2), 0], dist('B-ustaw-status.js')),
+    code('Ustaw status', [X(2), 0], dist('3-status-z-linku.js')),
     ifTrue('Czy poprawny?', [X(3), 0], '={{ $json.ok }}'),
     code('Wiersz do aktualizacji', [X(4), -100], "return [{ json: $('Ustaw status').first().json.update }];"),
     update('Aktualizuj lead', [X(5), -100]),
@@ -175,73 +277,21 @@ function build(c) {
     node('Pokaż potwierdzenie', 'n8n-nodes-base.respondToWebhook', 1.1, [X(8), -100], page("={{ $('Ustaw status').first().json.html }}", 200)),
     node('Pokaż błąd', 'n8n-nodes-base.respondToWebhook', 1.1, [X(4), 100], page('={{ $json.html }}', 400)),
   ], {
-    ...chain('Webhook', 'Pobierz lead', 'Ustaw status', 'Czy poprawny?'),
-    'Czy poprawny?': { main: [[{ node: 'Wiersz do aktualizacji', type: 'main', index: 0 }], [{ node: 'Pokaż błąd', type: 'main', index: 0 }]] },
+    ...chain('Klik w link', 'Pobierz lead', 'Ustaw status', 'Czy poprawny?'),
+    'Czy poprawny?': { main: [[to('Wiersz do aktualizacji')], [to('Pokaż błąd')]] },
     ...chain('Wiersz do aktualizacji', 'Aktualizuj lead', 'Historia', 'Zapisz historię', 'Pokaż potwierdzenie'),
   });
 
-  // ---------- C. Kontrola SLA ----------
-  const C = wf('KlimatechWfC0001', 'Klimatech C – Kontrola SLA (co 15 min)', [
-    node('Co 15 minut', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 15 }] } }),
-    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
-    konfiguracja([X(1), 0], [['TERAZ', '']]),
-    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
-    getRows('Pobierz leady', [X(3), 0], 'Leady'),
-    code('Sprawdź SLA', [X(4), 0], dist('C-sprawdz-sla.js')),
-    code('Wiersze SLA', [X(5), 0], '// Do arkusza tylko 3 kolumny\nreturn $input.all().map((i) => ({ json: { lead_id: i.json.lead_id, sla_poziom: i.json.sla_poziom, aktualizacja: i.json.aktualizacja } }));'),
-    update('Zapisz poziom SLA', [X(6), 0]),
-    code('Historia SLA', [X(7), 0], dist('C-historia-sla.js')),
-    append('Zapisz historię', [X(8), 0], 'Historia'),
-    code('Grupuj maile', [X(9), 0], dist('C-grupuj-maile.js')),
-    gmail('Wyślij mail', [X(10), 0], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}', { onError: 'continueRegularOutput' }),
-    code('Grupuj WhatsApp', [X(9), 200], dist('C-grupuj-whatsapp.js')),
-    waSend('Wyślij WhatsApp', [X(10), 200], '$json.chatId', '$json.message'),
-  ], {
-    'Co 15 minut': { main: [[{ node: 'Konfiguracja', type: 'main', index: 0 }]] },
-    'Test ręczny': { main: [[{ node: 'Konfiguracja', type: 'main', index: 0 }]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Sprawdź SLA', 'Wiersze SLA', 'Zapisz poziom SLA', 'Historia SLA', 'Zapisz historię'),
-    'Zapisz historię': { main: [[to('Grupuj maile'), to('Grupuj WhatsApp')]] },
-    'Grupuj maile': { main: [[to('Wyślij mail')]] },
-    'Grupuj WhatsApp': { main: [[to('Wyślij WhatsApp')]] },
-  });
-
-  // ---------- D. Odpowiedzi z WhatsAppa ----------
-  const D = wf('KlimatechWfD0001', 'Klimatech D – Odpowiedzi z WhatsAppa (co 1 min)', [
-    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
-    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
-    konfiguracja([X(1), 0]),
-    node('Pobierz wiadomości', 'n8n-nodes-base.httpRequest', 4.2, [X(2), 0], { method: 'GET', url: greenUrl('lastIncomingMessages', '?minutes=10'), options: {} },
-      { executeOnce: true, alwaysOutputData: true }),
-    node('Pobierz wysłane', 'n8n-nodes-base.httpRequest', 4.2, [X(3), 0], { method: 'GET', url: greenUrl('lastOutgoingMessages', '?minutes=10'), options: {} },
-      { executeOnce: true, alwaysOutputData: true }),
-    getRows('Pobierz leady', [X(4), 0], 'Leady'),
-    getRows('Pobierz handlowców', [X(5), 0], 'Handlowcy'),
-    code('Przetwórz odpowiedzi', [X(6), 0], dist('D-odpowiedzi-wa.js')),
-    code('Aktualizacje', [X(7), -200], 'return $input.all().filter((i) => i.json.update).map((i) => ({ json: i.json.update }));'),
-    update('Aktualizuj lead', [X(8), -200]),
-    code('Wpisy historii', [X(7), 0], 'return $input.all().flatMap((i) => (i.json.historia || []).map((h) => ({ json: h })));'),
-    append('Zapisz historię', [X(8), 0], 'Historia'),
-    code('Potwierdzenia', [X(7), 200], 'return $input.all().filter((i) => i.json.reply).map((i) => ({ json: i.json.reply }));'),
-    waSend('Odpisz na WhatsApp', [X(8), 200], '$json.chatId', '$json.message'),
-  ], {
-    'Co minutę': { main: [[to('Konfiguracja')]] },
-    'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz wiadomości', 'Pobierz wysłane', 'Pobierz leady', 'Pobierz handlowców', 'Przetwórz odpowiedzi'),
-    'Przetwórz odpowiedzi': { main: [[to('Aktualizacje'), to('Wpisy historii'), to('Potwierdzenia')]] },
-    'Aktualizacje': { main: [[to('Aktualizuj lead')]] },
-    'Wpisy historii': { main: [[to('Zapisz historię')]] },
-    'Potwierdzenia': { main: [[to('Odpisz na WhatsApp')]] },
-  });
-
-  // ---------- E. Synchronizacja arkusz -> Supabase (mini CRM) ----------
-  const E = wf('KlimatechWfE0001', 'Klimatech E – Synchronizacja z CRM (co 1 min)', [
-    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
-    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
+  // ======================================================================
+  // 4. SYNCHRONIZACJA Z CRM – arkusz -> Supabase (lustro), osobno od leadów
+  // ======================================================================
+  const W4 = wf('KlimatechWfE0001', 'Klimatech 4 – Synchronizacja z CRM', [
+    ...trigger1min(),
     konfiguracja([X(1), 0]),
     getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(3), 0], 'Leady'),
     getRows('Pobierz historię', [X(4), 0], 'Historia'),
-    code('Przygotuj dane', [X(5), 0], dist('E-synchronizacja.js')),
+    code('Przygotuj dane', [X(5), 0], dist('4-synchronizacja-crm.js')),
     node('Zapisz w Supabase', 'n8n-nodes-base.httpRequest', 4.2, [X(6), 0], {
       method: 'POST',
       url: `={{ ${K('SUPABASE_URL')} }}/rest/v1/{{ $json.tabela }}?on_conflict={{ $json.on_conflict }}`,
@@ -270,133 +320,16 @@ return out;`, { executeOnce: true }),
     ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
   });
 
-  // ---------- F. Skrzynka „Wpisz lead” (telefony i maile wpisywane przez biuro, później AI) ----------
-  const P = "$('Przetwórz skrzynkę').first().json";
-  const F = wf('KlimatechWfF0001', 'Klimatech F – Skrzynka „Wpisz lead” (co 1 min)', [
-    node('Co minutę', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, -100], { rule: { interval: [{ field: 'minutes', minutesInterval: 1 }] } }),
-    node('Test ręczny', 'n8n-nodes-base.manualTrigger', 1, [0, 100], {}),
-    konfiguracja([X(1), 0]),
-    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
-    getRows('Pobierz leady', [X(3), 0], 'Leady'),
-    getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead'),
-    code('Przetwórz skrzynkę', [X(5), 0], dist('F-skrzynka.js')),
-    // gałąź 1 (wykonuje się pierwsza): zapis leadów i historii, potem powiadomienia
-    code('Nowe leady', [X(6), -200], `return ${P}.leady.map((r) => ({ json: r }));`),
-    append('Zapisz leady', [X(7), -200], 'Leady'),
-    code('Wpisy historii', [X(8), -200], `return ${P}.historia.map((h) => ({ json: h }));`),
-    append('Zapisz historię', [X(9), -200], 'Historia'),
-    code('Maile', [X(10), -300], `if (String(${K('KANAL')} || 'mail') === 'whatsapp') return [];\nreturn ${P}.emaile.map((e) => ({ json: e }));`, { executeOnce: true }),
-    gmail('Wyślij mail', [X(11), -300], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}', { onError: 'continueRegularOutput' }),
-    code('Wiadomości WhatsApp', [X(10), -100], `return ${P}.whatsapp.map((w) => ({ json: w }));`, { executeOnce: true }),
-    waSend('Wyślij WhatsApp', [X(11), -100], '$json.chatId', '$json.message'),
-    // gałąź 2: informacja zwrotna dla Ani w wierszu (✅ / ⚠ / ❌)
-    code('Wyniki', [X(6), 200], `return ${P}.wyniki.map((w) => ({ json: w }));`),
-    node('Zapisz wynik w wierszu', 'n8n-nodes-base.googleSheets', 4.7, [X(7), 200], {
-      authentication: 'oAuth2', resource: 'sheet', operation: 'update', documentId: doc, sheetName: sheet('Wpisz lead'),
-      columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: ['row_number'], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
-      options: { cellFormat: 'RAW' },
-    }, { credentials: sheetsCred }),
-  ], {
-    'Co minutę': { main: [[to('Konfiguracja')]] },
-    'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Przetwórz skrzynkę'),
-    'Przetwórz skrzynkę': { main: [[to('Nowe leady'), to('Wyniki')]] },
-    ...chain('Nowe leady', 'Zapisz leady', 'Wpisy historii', 'Zapisz historię'),
-    'Zapisz historię': { main: [[to('Maile'), to('Wiadomości WhatsApp')]] },
-    'Maile': { main: [[to('Wyślij mail')]] },
-    'Wiadomości WhatsApp': { main: [[to('Wyślij WhatsApp')]] },
-    'Wyniki': { main: [[to('Zapisz wynik w wierszu')]] },
-  });
-
-  // ---------- Formularze z własną stroną wyniku (G – biuro, H – klient) – wspólna budowa ----------
-  const PL = "$('Przetwórz lead').first().json";
-  const opcje = (a) => ({ values: a.map((option) => ({ option })) });
-  const formWf = (id, name, trigger, glue) => wf(id, name, [
-    trigger,
-    code('Zgłoszenie', [X(1), 0], ZGLOSZENIE),
-    konfiguracja([X(2), 0]),
-    getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
-    getRows('Pobierz leady', [X(4), 0], 'Leady'),
-    code('Przetwórz lead', [X(5), 0], dist(glue)),
-    ifTrue('Nowy i poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
-    code('Wiersz do zapisu', [X(7), -100], 'return [{ json: ' + PL + '.row }];'),
-    append('Zapisz lead', [X(8), -100], 'Leady'),
-    code('Historia', [X(9), -100], 'return ' + PL + '.historia.map((h) => ({ json: h }));'),
-    append('Zapisz historię', [X(10), -100], 'Historia'),
-    ifExpr('Mail?', [X(11), -100], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
-    gmail('Wyślij mail', [X(12), -200], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true, onError: 'continueRegularOutput' }),
-    ifExpr('WhatsApp?', [X(13), -100], `={{ !!${PL}.whatsapp }}`),
-    waSend('Wyślij WhatsApp', [X(14), -200], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
-    node('Podsumowanie', 'n8n-nodes-base.form', 1, [X(15), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }, { executeOnce: true }),
-    // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, pokazujemy stronę z wyjaśnieniem
-    node('Popraw dane / już mamy', 'n8n-nodes-base.form', 1, [X(7), 100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
-  ], {
-    [trigger.name]: { main: [[to('Zgłoszenie')]] },
-    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Nowy i poprawny?'),
-    'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Popraw dane / już mamy')]] },
-    ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
-    'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
-    'Wyślij mail': { main: [[to('WhatsApp?')]] },
-    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Podsumowanie')]] },
-    'Wyślij WhatsApp': { main: [[to('Podsumowanie')]] },
-  });
-
-  // ---------- H. Formularz klienta (makieta formularza ze strony WWW) ----------
-  const H = formWf('KlimatechWfH0001', 'Klimatech H – Formularz klienta (makieta strony)',
-    node('Formularz klienta', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
-      formTitle: 'Zapytanie ofertowe – Klimatech',
-      formDescription: 'Pompy ciepła, klimatyzacja i rekuperacja dla instalatorów i inwestorów. Zostaw kontakt – doradca z Twojego województwa oddzwoni najpóźniej w ciągu jednego dnia roboczego (pn–pt 8–16).',
-      formFields: {
-        values: [
-          { fieldLabel: 'Firma', placeholder: 'np. Instal-Tech Kowalczyk', requiredField: true },
-          { fieldLabel: 'Imię i nazwisko', requiredField: true },
-          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333', requiredField: true },
-          { fieldLabel: 'E-mail', fieldType: 'email', placeholder: 'opcjonalnie' },
-          { fieldLabel: 'Miasto', requiredField: true },
-          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(WOJ), requiredField: true },
-          { fieldLabel: 'Czym jesteś zainteresowany?', fieldType: 'checkbox', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja']), requiredField: true },
-          { fieldLabel: 'Kim jesteś?', fieldType: 'radio', fieldOptions: opcje(['instalator / firma instalacyjna', 'hurtownia', 'deweloper / inwestor', 'klient indywidualny']) },
-          { fieldLabel: 'Orientacyjna wartość zamówienia (zł)', fieldType: 'number', placeholder: 'opcjonalnie' },
-          { fieldLabel: 'Wiadomość', fieldType: 'textarea', placeholder: 'np. ile urządzeń, na kiedy, jaki obiekt' },
-          { fieldLabel: 'Zgoda', fieldType: 'checkbox', fieldOptions: opcje(['Zgadzam się na kontakt telefoniczny i mailowy w sprawie tego zapytania. Administratorem danych jest Klimatech.']), requiredField: true },
-        ],
-      },
-      responseMode: 'lastNode',
-      options: { appendAttribution: false, buttonLabel: 'Wyślij zapytanie', path: 'klimatech' },
-    }, { webhookId: uid('f0f0f0f0') }),
-    'H-formularz-klienta.js');
-
-  // ---------- G. Formularz biura (propozycja zamiast wpisywania w arkusz) ----------
-  const G = formWf('KlimatechWfG0001', 'Klimatech G – Formularz biura',
-    node('Formularz biura', 'n8n-nodes-base.formTrigger', 2.2, [0, 0], {
-      formTitle: 'Klimatech – wpisz lead (biuro)',
-      formDescription: 'Dla zapytań z telefonu, maila, targów i poleceń. Lead trafi do handlowca z województwa tak samo jak z formularza na stronie. Podaj telefon albo e-mail.',
-      formFields: {
-        values: [
-          { fieldLabel: 'Źródło', fieldType: 'dropdown', fieldOptions: opcje(['telefon', 'mail', 'targi', 'polecenie', 'inne']), requiredField: true },
-          { fieldLabel: 'Firma' },
-          { fieldLabel: 'Osoba kontaktowa' },
-          { fieldLabel: 'Telefon', placeholder: 'np. 601 222 333 – dowolny format' },
-          { fieldLabel: 'E-mail', fieldType: 'email' },
-          { fieldLabel: 'Miasto' },
-          { fieldLabel: 'Województwo', fieldType: 'dropdown', fieldOptions: opcje(['(ustal z miasta)', ...WOJ.slice(1)]) },
-          { fieldLabel: 'Zainteresowanie', fieldType: 'dropdown', fieldOptions: opcje(['pompy ciepła', 'klimatyzacja', 'rekuperacja', 'inne']), requiredField: true },
-          { fieldLabel: 'Szacowana wartość (zł)', fieldType: 'number' },
-          { fieldLabel: 'Treść zapytania / notatka z rozmowy', fieldType: 'textarea' },
-          { fieldLabel: 'Data kontaktu', fieldType: 'date' },
-          { fieldLabel: 'Godzina kontaktu', placeholder: 'np. 09:10 – puste pola daty i godziny = teraz' },
-          { fieldLabel: 'Kto wpisuje', fieldType: 'dropdown', fieldOptions: opcje(['Ania (biuro)', 'Marek', 'inna osoba']), requiredField: true },
-        ],
-      },
-      responseMode: 'lastNode',
-      options: { appendAttribution: false, buttonLabel: 'Zapisz i przekaż handlowcowi', path: 'biuro' },
-    }, { webhookId: uid('b10b10b1') }),
-    'G-formularz-biura.js');
-
-  return { 'H-formularz-klienta': H, 'G-formularz-biura': G, 'A-przyjecie-leada': A, 'B-status-z-maila': B, 'C-kontrola-sla': C, 'D-odpowiedzi-whatsapp': D, 'E-synchronizacja-crm': E, 'F-skrzynka-wpisz-lead': F };
+  return {
+    '1-przyjecie-leada': W1,
+    '2-obsluga-co-minute': W2,
+    '3-status-z-linku': W3,
+    '4-synchronizacja-crm': W4,
+  };
 }
 
 function write(dir, cfg) {
+  rmSync(dir, { recursive: true, force: true }); // bez starych plików po zmianie architektury
   mkdirSync(dir, { recursive: true });
   for (const [f, w] of Object.entries(build(cfg))) {
     writeFileSync(`${dir}/${f}.json`, JSON.stringify(w, null, 2) + '\n');

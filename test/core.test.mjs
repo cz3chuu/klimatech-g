@@ -110,7 +110,7 @@ test('C: po imporcie brak zaległych powiadomień, następnego dnia eskalacje', 
 
 // --- kod wklejany do n8n działa z obiektem $ jak w węźle Code ---
 test('n8n/dist: węzeł "Przetwórz lead" uruchamia się z mockiem $', () => {
-  const code = readFileSync('n8n/dist/A-przetworz-lead.js', 'utf8');
+  const code = readFileSync('n8n/dist/1-przyjecie-leada.js', 'utf8');
   const nodes = {
     Konfiguracja: [cfg],
     'Zgłoszenie': [{ firma: 'Test', telefon: '700 300 400', miasto: 'Gdańsk' }],
@@ -212,7 +212,7 @@ test('CRM: znany klient – w powiadomieniu ostatnia notatka i kto rozmawiał', 
 
 // --- kod synchronizacji z CRM działa z obiektem $ jak w węźle Code ---
 test('n8n/dist: "Przygotuj dane" (E) – paczki dla Supabase bez tokenu, z klient_id i czasami', () => {
-  const code = readFileSync('n8n/dist/E-synchronizacja.js', 'utf8');
+  const code = readFileSync('n8n/dist/4-synchronizacja-crm.js', 'utf8');
   const { historia } = importLeads(leady, handlowcy, NOW);
   const nodes = { 'Pobierz handlowców': handlowcy, 'Pobierz leady': rows, 'Pobierz historię': [...historia, historia[0]] };
   const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
@@ -252,15 +252,32 @@ test('Skrzynka: przyszła data kontaktu i AI do zatwierdzenia', () => {
   assert.equal(out.leady[0].data_zgloszenia, '2026-10-05 11:00');
   assert.equal(out.historia[0].kto, 'AI z maila, zatwierdziła Ania');
 });
-test('n8n/dist: "Przetwórz skrzynkę" (F) – szablon zakładki daje ✅, ⚠ ponowienie i ❌', () => {
-  const code = readFileSync('n8n/dist/F-skrzynka.js', 'utf8');
+test('n8n/dist: "Obsłuż" (obsługa co minutę) – skrzynka, odpowiedź WhatsApp i SLA w jednym przebiegu', () => {
+  const code = readFileSync('n8n/dist/2-obsluga-co-minute.js', 'utf8');
   const wpisy = parseCsv(readFileSync('data/wpisz-lead-szablon.csv', 'utf8')).map((r, i) => ({ ...r, row_number: i + 2 }));
-  const nodes = { Konfiguracja: [cfgWa], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy };
+  const odp = { ...msg('1 wysłałem cennik', '🆔 L-005'), idMessage: 'W1' };
+  const nodes = {
+    Konfiguracja: [{ ...cfgWa, TERAZ: '2026-10-05 10:00' }], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy,
+    'Pobierz wiadomości': [odp, odp], 'Pobierz wysłane': [{ error: 'brak' }],
+  };
   const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
-  const out = new Function('$', code)($)[0].json;
+  const pamiec = {};
+  const out = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' })[0].json;
   assert.deepEqual(out.wyniki.map((w) => w.wynik.slice(0, 1)), ['✅', '⚠', '❌']);
   assert.match(out.wyniki[0].wynik, /Ewa Sowa \(pomorskie\)/); // Słupsk -> pomorskie z miasta
   assert.match(out.wyniki[1].wynik, /ponowienie L-031/);
+  assert.equal(out.nowe_leady.length, 2);
+  const l005 = out.aktualizacje.find((u) => u.lead_id === 'L-005');
+  assert.equal(l005.status, 'dodzwoniono'); // ta sama wiadomość dwa razy -> jedna zmiana
+  assert.equal(l005.notatka, 'wysłałem cennik');
+  assert.ok(out.aktualizacje.some((u) => u.sla_poziom >= 1)); // TERAZ ustawione -> SLA policzone
+  assert.ok(out.historia.some((h) => h.zdarzenie === 'sla'));
+  assert.deepEqual(pamiec.wa, ['W1']);
+  // drugi przebieg z tymi samymi danymi: skrzynka i wiadomość już obsłużone (wynik wpisany, id zapamiętane)
+  nodes['Pobierz skrzynkę'] = wpisy.map((w, i) => ({ ...w, wynik: out.wyniki[i].wynik }));
+  nodes.Konfiguracja = [cfgWa]; // bez TERAZ: SLA tylko co 15 min, test o pełnej godzinie byłby losowy -> sprawdzamy brak powtórek
+  const out2 = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' });
+  assert.ok(out2.length === 0 || (out2[0].json.wyniki.length === 0 && !out2[0].json.aktualizacje.some((u) => u.notatka)));
 });
 test('G: strona po wysłaniu formularza biura – podsumowanie, ostrzeżenie o duplikacie, błędy', () => {
   const ok = core.processInquiry({ firma: 'Termex', telefon: '629 707 505', miasto: 'Płock' }, rows, handlowcy, cfgWa, '2026-10-05 11:00');

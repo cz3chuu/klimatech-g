@@ -1,4 +1,4 @@
-// === Węzeł Code: "Ustaw status" (workflow B, tryb: Run Once for All Items) ===
+// === Węzeł Code: "Ustaw status" (workflow 3 – Status z linku, tryb: Run Once for All Items) ===
 const query = $('Webhook').first().json.query || {};
 const rows = $('Pobierz lead').all().map((i) => i.json).filter((r) => r.lead_id);
 

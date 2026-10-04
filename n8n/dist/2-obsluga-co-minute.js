@@ -774,19 +774,72 @@ function groupSlaWhatsapp(items, cfg) {
   }).filter(Boolean);
 }
 
-// === Węzeł Code: "Przetwórz odpowiedzi" (workflow D, tryb: Run Once for All Items) ===
-// Wejście: wiadomości przychodzące z Green API (lastIncomingMessages). Wyjście: jeden item na rozpoznaną odpowiedź
-// { update?, historia?, reply } – dalej trzy gałęzie: aktualizacja arkusza, historia, potwierdzenie na WhatsApp.
+// ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------
+// Jeden przebieg, jeden stan: skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
+// Kolejne kroki widzą zmiany poprzednich (np. lead ze skrzynki potwierdzony w tej samej minucie).
+const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po SLA (1 dzień)', 3: 'eskalacja do Marka (2 dni)' };
+function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false }) {
+  const out = { nowe_leady: [], aktualizacje: [], historia: [], emaile: [], whatsapp: [], wyniki: [] };
+  const mail = String(cfg.KANAL || 'mail') !== 'whatsapp';
+
+  // 1. Skrzynka „Wpisz lead”
+  const inbox = processInbox(wpisy, rows, handlowcy, cfg, now);
+  out.nowe_leady.push(...inbox.leady);
+  out.historia.push(...inbox.historia);
+  out.wyniki.push(...inbox.wyniki);
+  if (mail) out.emaile.push(...inbox.emaile);
+  out.whatsapp.push(...inbox.whatsapp);
+  let stan = [...rows, ...inbox.leady];
+
+  // 2. Odpowiedzi handlowców z WhatsAppa
+  const zmiany = {};
+  const zmien = (id, z) => {
+    zmiany[id] = { ...(zmiany[id] || { lead_id: id }), ...z };
+    stan = stan.map((r) => (r.lead_id === id ? { ...r, ...z } : r));
+  };
+  for (const w of processWaReplies(wiadomosci, stan, handlowcy, cfg, now)) {
+    if (w.update) zmien(w.lead_id, w.update);
+    if (w.historia) out.historia.push(...w.historia);
+    if (w.reply) out.whatsapp.push(w.reply);
+  }
+
+  // 3. SLA: przypomnienia i eskalacje
+  if (sla) {
+    const items = checkSla(stan, handlowcy, cfg, now);
+    items.forEach((it) => {
+      zmien(it.lead_id, { sla_poziom: it.poziom, aktualizacja: now });
+      out.historia.push({ czas: now, lead_id: it.lead_id, zdarzenie: 'sla', kto: 'system',
+        szczegoly: `${SLA_HISTORIA[it.poziom]}; czeka ${it.minuty} min roboczych; powiadomienie do ${it.do.nazwa}` });
+    });
+    if (mail) out.emaile.push(...groupSlaEmails(items, cfg));
+    out.whatsapp.push(...groupSlaWhatsapp(items, cfg));
+  }
+
+  // Zmiany leadów dodanych w tym przebiegu trafiają od razu do nowego wiersza (jeszcze go nie ma w arkuszu)
+  out.nowe_leady = out.nowe_leady.map((r) => (zmiany[r.lead_id] ? { ...r, ...zmiany[r.lead_id] } : r));
+  out.nowe_leady.forEach((r) => { delete zmiany[r.lead_id]; });
+  out.aktualizacje = Object.values(zmiany);
+  out.cokolwiek = Object.values(out).some((v) => Array.isArray(v) && v.length > 0);
+  return out;
+}
+
+// === Węzeł Code: "Obsłuż" (workflow 2 – Obsługa co minutę, tryb: Run Once for All Items) ===
+// Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze).
+// TERAZ w Konfiguracji (np. "2026-10-05 10:00") symuluje czas – do demo poza godzinami pracy.
 const cfg = $('Konfiguracja').first().json;
-// Przychodzące + wysłane z telefonu (te drugie tylko dla makiety na jednym telefonie – czat „Ty”)
-const wiadomosci = [...$('Pobierz wiadomości').all(), ...$('Pobierz wysłane').all()].map((i) => i.json).filter((m) => m && m.idMessage);
+const now = String(cfg.TERAZ || '').trim() || nowWarsaw();
 const rows = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
 const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);
+const wpisy = $('Pobierz skrzynkę').all().map((i) => i.json).filter((r) => r.row_number); // brak zakładki = brak wpisów
+const wszystkie = [...$('Pobierz wiadomości').all(), ...$('Pobierz wysłane').all()].map((i) => i.json).filter((m) => m && m.idMessage);
 
-// Pamięć przetworzonych wiadomości – n8n zapisuje ją tylko w przebiegach aktywnego workflow (nie przy ręcznym teście)
+// Pamięć przetworzonych wiadomości WhatsApp – n8n zapisuje ją w przebiegach aktywnego workflow
 const pamiec = $getWorkflowStaticData('global');
 const zrobione = new Set(pamiec.wa || []);
-const nowe = wiadomosci.filter((m) => !zrobione.has(m.idMessage)).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-pamiec.wa = [...zrobione, ...nowe.map((m) => m.idMessage)].slice(-500);
+const unikalne = [...new Map(wszystkie.map((m) => [m.idMessage, m])).values()]; // ta sama wiadomość w obu listach = jedna
+const wiadomosci = unikalne.filter((m) => !zrobione.has(m.idMessage)).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+pamiec.wa = [...zrobione, ...wiadomosci.map((m) => m.idMessage)].slice(-500);
 
-return processWaReplies(nowe, rows, handlowcy, cfg, nowWarsaw()).map((w) => ({ json: w }));
+const sla = $execution.mode === 'manual' || !!String(cfg.TERAZ || '').trim() || Number(now.slice(14, 16)) % 15 === 0;
+const wynik = processCycle({ wpisy, wiadomosci, rows, handlowcy, cfg, now, sla });
+return wynik.cokolwiek ? [{ json: wynik }] : [];
