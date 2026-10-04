@@ -1,0 +1,23 @@
+{
+  "_instrukcja": "Skopiuj do n8n/config.local.json (plik jest w .gitignore) i uzupełnij. Potem: npm run build:workflows -> n8n/workflows.local/*.json",
+
+  "SHEET_ID": "ID arkusza Google – fragment adresu między /d/ a /edit",
+  "SHEETS_CRED": { "id": "ID poświadczenia Google Sheets OAuth2 z n8n", "name": "Google Sheets account" },
+  "GMAIL_CRED": { "id": "ID poświadczenia Gmail OAuth2 z n8n", "name": "Gmail account" },
+  "SUPABASE_CRED": { "id": "ID poświadczenia Custom Auth z nagłówkiem apikey (klucz secret Supabase)", "name": "Supabase – klucz secret" },
+
+  "N8N_URL": "http://localhost:5678",
+  "TRYB_TESTOWY": "true",
+  "TEST_INBOX": "twoj.mail@gmail.com",
+  "KANAL": "oba",
+
+  "GREEN_API_URL": "https://XXXX.api.greenapi.com",
+  "GREEN_ID": "idInstance z konsoli Green API",
+  "GREEN_TOKEN": "apiTokenInstance z konsoli Green API",
+  "GREEN_PHONE": "numer podpięty do Green API, np. 48600000000",
+  "TEST_WHATSAPP": "numer, na który w trybie testowym idą wszystkie WhatsAppy, np. 48600000001",
+
+  "SUPABASE_URL": "https://TWOJ-PROJEKT.supabase.co",
+  "SUPABASE_PUBLIC_KEY": "sb_publishable_... (tylko dla strony CRM)",
+  "SUPABASE_SECRET_KEY": "sb_secret_... (tylko do założenia poświadczenia w n8n – nie trafia do workflow)"
+}
