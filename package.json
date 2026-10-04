@@ -1,0 +1,10 @@
+{
+  "name": "klimatech-leady",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build:n8n": "node scripts/build-n8n.mjs",
+    "import": "node scripts/import-csv.mjs --now \"2026-10-04 23:59\""
+  }
+}
