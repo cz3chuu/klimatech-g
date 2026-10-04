@@ -285,6 +285,11 @@ ol.tl li:last-child::before { display: none; }
         <div class="toolbar">
           <div class="chips" id="chips" role="group" aria-label="Szybkie filtry"></div>
           <div class="spacer"></div>
+          <select id="f-sort" aria-label="Sortowanie">
+            <option value="najnowsze">Najnowsze</option>
+            <option value="czeka">Najdłużej czekające</option>
+            <option value="wartosc">Największa wartość</option>
+          </select>
           <select id="f-opiekun" aria-label="Opiekun"><option value="">Każdy opiekun</option></select>
           <div class="search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -475,9 +480,15 @@ function rysujListe() {
   dane.leady.filter((l) => l.duplikat_typ === 'pewny').forEach((l) => { ponowienia[l.klient_id] = (ponowienia[l.klient_id] || 0) + 1; });
   const qCyfry = q.replace(/\D/g, '');
   const pasuje = (l) => !q || [l.lead_id, l.firma, l.osoba, l.email, l.miasto].some((v) => String(v || '').toLowerCase().includes(q)) || (qCyfry.length >= 3 && String(l.telefon_norm || '').includes(qCyfry));
-  const lista = unikalne().filter((l) => f(l) && (!op || opiekun(l) === op) && pasuje(l))
-    .sort((a, b) => (filtr === 'otwarte' || filtr === 'po_sla') ? (b.czeka_min ?? -1) - (a.czeka_min ?? -1) : 0);
-  $('licznik').textContent = `${lista.length} ${lista.length === 1 ? 'lead' : lista.length < 5 && lista.length > 1 ? 'leady' : 'leadów'}${filtr === 'otwarte' || filtr === 'po_sla' ? ' · najdłużej czekające na górze' : ''}`;
+  const sort = $('f-sort').value;
+  const porownaj = {
+    najnowsze: (a, b) => String(b.data_zgloszenia).localeCompare(String(a.data_zgloszenia)),
+    czeka: (a, b) => (b.czeka_min ?? -1) - (a.czeka_min ?? -1),
+    wartosc: (a, b) => Number(b.szac_wartosc_pln || 0) - Number(a.szac_wartosc_pln || 0),
+  }[sort];
+  const lista = unikalne().filter((l) => f(l) && (!op || opiekun(l) === op) && pasuje(l)).sort(porownaj);
+  const opisSort = { najnowsze: 'najnowsze na górze', czeka: 'najdłużej czekające na górze', wartosc: 'największa wartość na górze' }[sort];
+  $('licznik').textContent = `${lista.length} ${lista.length === 1 ? 'lead' : lista.length < 5 && lista.length > 1 ? 'leady' : 'leadów'} · ${opisSort}`;
   if (!lista.length) {
     $('lista').innerHTML = `<tr><td colspan="8" class="empty">${dane.leady.length ? 'Nic tu nie ma dla wybranych filtrów.' : 'Brak danych. Włącz w n8n workflow „E – Synchronizacja z CRM”.'}</td></tr>`;
     return;
@@ -500,7 +511,9 @@ function rysujListe() {
   }).join('');
 }
 $('lista').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) otworz(tr.dataset.id); });
-['szukaj', 'f-opiekun'].forEach((id) => $(id).addEventListener('input', rysujListe));
+['szukaj', 'f-opiekun', 'f-sort'].forEach((id) => $(id).addEventListener('input', rysujListe));
+// „Po SLA” najbardziej przydaje się posortowane od najdłużej czekających
+$('chips').addEventListener('click', (e) => { const b = e.target.closest('[data-f]'); if (b && b.dataset.f === 'po_sla') { $('f-sort').value = 'czeka'; rysujListe(); } });
 
 function otworz(id) { wybrany = id; $('karta').hidden = false; $('widok-leady').classList.remove('no-detail'); rysujKarte(id); rysujListe(); $('karta').scrollTop = 0; }
 function zamknij() { wybrany = null; $('karta').hidden = true; $('widok-leady').classList.add('no-detail'); rysujListe(); }
