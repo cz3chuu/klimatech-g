@@ -113,7 +113,7 @@ test('n8n/dist: węzeł "Przetwórz lead" uruchamia się z mockiem $', () => {
   const code = readFileSync('n8n/dist/A-przetworz-lead.js', 'utf8');
   const nodes = {
     Konfiguracja: [cfg],
-    Webhook: [{ body: { firma: 'Test', telefon: '700 300 400', miasto: 'Gdańsk' } }],
+    'Zgłoszenie': [{ firma: 'Test', telefon: '700 300 400', miasto: 'Gdańsk' }],
     'Pobierz leady': rows,
     'Pobierz handlowców': handlowcy,
   };

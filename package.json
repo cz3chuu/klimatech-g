@@ -5,6 +5,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "build:n8n": "node scripts/build-n8n.mjs",
-    "import": "node scripts/import-csv.mjs --now \"2026-10-04 23:59\""
+    "import": "node scripts/import-csv.mjs --now \"2026-10-04 23:59\"",
+    "build:workflows": "node scripts/build-n8n.mjs && node scripts/build-workflows.mjs"
   }
 }

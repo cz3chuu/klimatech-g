@@ -1,0 +1,351 @@
+{
+  "id": "KlimatechWfB0001",
+  "name": "Klimatech B – Status z maila",
+  "active": false,
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000025",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "e1e1e1e1-0000-4000-8000-000000000024"
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000026",
+      "name": "Pobierz lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "WKLEJ_ID_ARKUSZA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leady",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000027",
+      "name": "Ustaw status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// WYGENEROWANE przez scripts/build-n8n.mjs – nie edytuj ręcznie, zmieniaj n8n/src/*\n// Kod konkretnego węzła jest NA DOLE pliku.\n\n// =====================================================================\n// KLIMATECH – RDZEŃ LOGIKI LEADÓW\n// Jedno źródło prawdy. Używane przez:\n//  - węzły Code w n8n (wklejane z n8n/dist/*.js, budowane skryptem)\n//  - skrypt importu historycznych danych (scripts/import-csv.mjs)\n//  - testy (test/core.test.mjs)\n// Czysty JavaScript, bez zależności (węzeł Code w n8n nie ma npm).\n// Czas: wszystkie daty to czas lokalny Warszawy w formacie \"YYYY-MM-DD HH:mm\".\n// =====================================================================\n\nconst WOJEWODZTWA = [\n  'dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie',\n  'małopolskie', 'mazowieckie', 'opolskie', 'podkarpackie', 'podlaskie',\n  'pomorskie', 'śląskie', 'świętokrzyskie', 'warmińsko-mazurskie',\n  'wielkopolskie', 'zachodniopomorskie',\n];\n\n// Fallback gdy brak województwa. Produkcyjnie: kod pocztowy -> TERYT.\nconst MIASTA = {\n  'warszawa': 'mazowieckie', 'radom': 'mazowieckie', 'płock': 'mazowieckie', 'siedlce': 'mazowieckie',\n  'kraków': 'małopolskie', 'tarnów': 'małopolskie', 'nowy sącz': 'małopolskie',\n  'łódź': 'łódzkie', 'piotrków trybunalski': 'łódzkie',\n  'wrocław': 'dolnośląskie', 'legnica': 'dolnośląskie', 'wałbrzych': 'dolnośląskie',\n  'poznań': 'wielkopolskie', 'kalisz': 'wielkopolskie', 'konin': 'wielkopolskie',\n  'gdańsk': 'pomorskie', 'gdynia': 'pomorskie', 'sopot': 'pomorskie', 'słupsk': 'pomorskie',\n  'szczecin': 'zachodniopomorskie', 'koszalin': 'zachodniopomorskie',\n  'bydgoszcz': 'kujawsko-pomorskie', 'toruń': 'kujawsko-pomorskie', 'włocławek': 'kujawsko-pomorskie',\n  'lublin': 'lubelskie', 'zamość': 'lubelskie', 'chełm': 'lubelskie',\n  'białystok': 'podlaskie', 'suwałki': 'podlaskie', 'łomża': 'podlaskie',\n  'katowice': 'śląskie', 'gliwice': 'śląskie', 'częstochowa': 'śląskie', 'bielsko-biała': 'śląskie',\n  'kielce': 'świętokrzyskie', 'ostrowiec świętokrzyski': 'świętokrzyskie',\n  'rzeszów': 'podkarpackie', 'krosno': 'podkarpackie', 'przemyśl': 'podkarpackie',\n  'olsztyn': 'warmińsko-mazurskie', 'elbląg': 'warmińsko-mazurskie',\n  'opole': 'opolskie',\n  'zielona góra': 'lubuskie', 'gorzów wielkopolski': 'lubuskie', 'żary': 'lubuskie',\n};\n\nconst DARMOWE_DOMENY = ['gmail.com', 'wp.pl', 'o2.pl', 'onet.pl', 'interia.pl', 'op.pl', 'poczta.onet.pl', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'tlen.pl', 'gazeta.pl'];\nconst SLOWA_POMIJANE = ['phu', 'pphu', 'fhu', 'zph', 'ppuh', 'phup', 'firma', 'przedsiębiorstwo', 'zakład'];\n\nconst STATUSY = ['nowy', 'nie_odebral', 'dodzwoniono', 'umowione', 'niezainteresowany'];\nconst STATUSY_ZAMYKAJACE_SLA = ['dodzwoniono', 'umowione', 'niezainteresowany'];\nconst STATUS_ETYKIETY = { nowy: 'Nowy', nie_odebral: 'Nie odebrał', dodzwoniono: 'Dodzwoniono się', umowione: 'Umówione spotkanie', niezainteresowany: 'Niezainteresowany' };\n\nconst GODZ_OD = 8, GODZ_DO = 16;\n// Progi SLA w minutach roboczych: 4 h -> przypomnienie, 1 dzień -> \"po SLA\", 2 dni -> eskalacja do Marka\nconst SLA_PROGI = [240, 480, 960];\n\n// ---------------- Czas ----------------\n\nfunction parseLocal(s) {\n  const m = String(s || '').trim().match(/^(\\d{4})-(\\d{2})-(\\d{2})[ T](\\d{2}):(\\d{2})/);\n  if (!m) return null;\n  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));\n}\nfunction formatLocal(d) {\n  return d.toISOString().slice(0, 16).replace('T', ' ');\n}\nfunction nowWarsaw() {\n  const s = new Intl.DateTimeFormat('sv-SE', {\n    timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', hour12: false,\n  }).format(new Date());\n  return s.replace(',', '').slice(0, 16);\n}\n\nfunction easter(y) { // algorytm Meeusa/Jonesa/Butchera\n  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;\n  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);\n  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;\n  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);\n  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;\n  return new Date(Date.UTC(y, month - 1, day));\n}\nconst _swieta = {};\nfunction holidays(y) {\n  if (_swieta[y]) return _swieta[y];\n  const iso = (d) => d.toISOString().slice(0, 10);\n  const plus = (d, n) => new Date(d.getTime() + n * 864e5);\n  const e = easter(y);\n  const stale = ['01-01', '01-06', '05-01', '05-03', '08-15', '11-01', '11-11', '12-25', '12-26'];\n  if (y >= 2025) stale.push('12-24'); // Wigilia wolna od 2025\n  const set = new Set(stale.map((md) => `${y}-${md}`));\n  [e, plus(e, 1), plus(e, 49), plus(e, 60)].forEach((d) => set.add(iso(d))); // Wielkanoc, pon., Zielone Świątki, Boże Ciało\n  _swieta[y] = set;\n  return set;\n}\nfunction isBusinessDay(d) {\n  const wd = d.getUTCDay();\n  return wd !== 0 && wd !== 6 && !holidays(d.getUTCFullYear()).has(d.toISOString().slice(0, 10));\n}\nfunction isBusinessTime(s) {\n  const d = parseLocal(s);\n  return !!d && isBusinessDay(d) && d.getUTCHours() >= GODZ_OD && d.getUTCHours() < GODZ_DO;\n}\n// Minuty robocze (pn–pt 8–16, bez świąt) między dwiema datami\nfunction businessMinutes(fromStr, toStr) {\n  const a = parseLocal(fromStr), b = parseLocal(toStr);\n  if (!a || !b || b <= a) return 0;\n  let total = 0;\n  const day = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate()));\n  while (day <= b) {\n    if (isBusinessDay(day)) {\n      const s = new Date(day.getTime() + GODZ_OD * 36e5), e = new Date(day.getTime() + GODZ_DO * 36e5);\n      const from = a > s ? a : s, to = b < e ? b : e;\n      if (to > from) total += (to - from) / 6e4;\n    }\n    day.setUTCDate(day.getUTCDate() + 1);\n  }\n  return Math.round(total);\n}\n// Moment startu zegara SLA (lead po 16:00 lub w weekend -> następny dzień roboczy 8:00)\nfunction slaStart(createdStr) {\n  const d = parseLocal(createdStr);\n  if (!d) return null;\n  if (isBusinessTime(createdStr)) return createdStr;\n  const day = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));\n  if (!isBusinessDay(day) || d.getUTCHours() >= GODZ_DO) day.setUTCDate(day.getUTCDate() + 1);\n  while (!isBusinessDay(day)) day.setUTCDate(day.getUTCDate() + 1);\n  return formatLocal(new Date(day.getTime() + GODZ_OD * 36e5));\n}\nfunction slaLevel(minutes) {\n  return SLA_PROGI.filter((p) => minutes >= p).length; // 0..3\n}\nfunction fmtGodziny(min) {\n  const h = Math.floor(min / 60), m = min % 60;\n  return h ? `${h} h ${m} min` : `${m} min`;\n}\n\n// ---------------- Normalizacja ----------------\n\nfunction normalizePhone(raw) {\n  let d = String(raw ?? '').replace(/\\D/g, '');\n  if (d.startsWith('0048')) d = d.slice(4);\n  else if (d.length === 11 && d.startsWith('48')) d = d.slice(2);\n  return d.length === 9 ? '+48' + d : '';\n}\nfunction formatPhone(norm) {\n  return norm ? norm.replace(/^\\+48(\\d{3})(\\d{3})(\\d{3})$/, '+48 $1 $2 $3') : '';\n}\nfunction normalizeEmail(raw) {\n  const e = String(raw ?? '').trim().toLowerCase();\n  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(e) ? e : '';\n}\nfunction emailDomain(email) {\n  const d = email.split('@')[1] || '';\n  return DARMOWE_DOMENY.includes(d) ? '' : d;\n}\n// \"ZPH Termex\" i \"Termex ZPH Sp. j.\" -> \"termex\"\nfunction companyKey(raw) {\n  let s = String(raw ?? '').toLowerCase();\n  s = s.replace(/\\bsp(ółka|\\.)?\\s*z\\s*o\\.?\\s*o\\.?/g, ' ')\n    .replace(/\\bsp(ółka|\\.)?\\s*(j|k|c|p)\\.?(?=\\s|$)/g, ' ')\n    .replace(/\\bs\\.?\\s*a\\.?(?=\\s|$)/g, ' ')\n    .replace(/[^\\p{L}\\p{N}]+/gu, ' ');\n  const tokens = [...new Set(s.split(' ').filter((t) => t && !SLOWA_POMIJANE.includes(t)))];\n  return tokens.sort().join(' ');\n}\nfunction normalizeWojewodztwo(raw, miasto) {\n  const w = String(raw ?? '').trim().toLowerCase().replace(/^woj(\\.|ewództwo)?\\s*/, '');\n  if (WOJEWODZTWA.includes(w)) return { wojewodztwo: w, zrodlo: 'formularz' };\n  const z = MIASTA[String(miasto ?? '').trim().toLowerCase()];\n  if (z) return { wojewodztwo: z, zrodlo: 'miasto' };\n  return { wojewodztwo: '', zrodlo: 'brak' };\n}\n\n// ---------------- Deduplikacja ----------------\n// pewny: ten sam telefon lub e-mail -> łączymy automatycznie\n// mozliwy: ta sama nazwa firmy (po normalizacji) lub ta sama firmowa domena -> do potwierdzenia przez Anię\nfunction findDuplicate(lead, existing) {\n  const byId = Object.fromEntries(existing.map((r) => [r.lead_id, r]));\n  const root = (r) => {\n    let cur = r, guard = 0;\n    while (cur && cur.duplikat_typ === 'pewny' && cur.duplikat_of && byId[cur.duplikat_of] && guard++ < 20) cur = byId[cur.duplikat_of];\n    return cur;\n  };\n  const sorted = [...existing].sort((a, b) => String(a.data_zgloszenia).localeCompare(String(b.data_zgloszenia)));\n  const rules = [\n    ['pewny', 'telefon', (r) => lead.telefon_norm && normalizePhone(r.telefon_norm || r.telefon) === lead.telefon_norm],\n    ['pewny', 'e-mail', (r) => lead.email_norm && normalizeEmail(r.email) === lead.email_norm],\n    ['mozliwy', 'nazwa firmy', (r) => lead.firma_klucz && (r.firma_klucz || companyKey(r.firma)) === lead.firma_klucz],\n    ['mozliwy', 'domena e-mail', (r) => { const d = emailDomain(lead.email_norm); return d && emailDomain(normalizeEmail(r.email)) === d; }],\n  ];\n  for (const [typ, powod, test] of rules) {\n    const hit = sorted.find(test);\n    if (hit) return { typ, powod, original: root(hit) };\n  }\n  return null;\n}\n\n// ---------------- Routing ----------------\n\nfunction parseHandlowcy(rows) {\n  const map = {};\n  rows.forEach((h) => String(h.wojewodztwa || '').split(';').map((w) => w.trim().toLowerCase()).filter(Boolean)\n    .forEach((w) => { map[w] = { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email }; }));\n  return map;\n}\nfunction route(wojewodztwo, handlowcyMap) {\n  if (!wojewodztwo) return { routing: 'do_ustalenia', handlowiec: null };\n  const h = handlowcyMap[wojewodztwo];\n  return h ? { routing: 'handlowiec', handlowiec: h } : { routing: 'bez_opiekuna', handlowiec: null };\n}\nfunction recipientFor(row, handlowcyRows, cfg) {\n  if (row.routing === 'bez_opiekuna') return { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL };\n  if (row.routing === 'do_ustalenia') return { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL };\n  const h = handlowcyRows.find((x) => x.handlowiec_id === row.handlowiec_id);\n  return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email } : { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL };\n}\n\n// ---------------- Pomocnicze ----------------\n\nfunction makeToken() {\n  let t = '';\n  for (let i = 0; i < 16; i++) t += Math.floor(Math.random() * 16).toString(16);\n  return t;\n}\nfunction nextLeadId(existing) {\n  const max = existing.reduce((m, r) => Math.max(m, parseInt(String(r.lead_id || '').replace(/\\D/g, ''), 10) || 0), 0);\n  return 'L-' + String(max + 1).padStart(3, '0');\n}\nfunction esc(s) {\n  return String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]));\n}\nfunction zl(v) {\n  const n = Number(v);\n  return n ? n.toLocaleString('pl-PL') + ' zł' : '—';\n}\n\n// ---------------- Treści maili ----------------\n\nfunction statusButtons(cfg, leadId, token, kto) {\n  const btn = (s, label, color) =>\n    `<a href=\"${esc(cfg.STATUS_URL)}?lead=${encodeURIComponent(leadId)}&t=${token}&s=${s}&kto=${encodeURIComponent(kto)}\" ` +\n    `style=\"display:inline-block;margin:4px 6px 4px 0;padding:10px 14px;background:${color};color:#fff;text-decoration:none;border-radius:6px;font-weight:bold\">${label}</a>`;\n  return btn('dodzwoniono', '✅ Dodzwoniłem się', '#15803d') + btn('nie_odebral', '📵 Nie odebrał', '#b45309') +\n    btn('umowione', '📅 Umówione', '#1d4ed8') + btn('niezainteresowany', '✖ Niezainteresowany', '#6b7280');\n}\nfunction leadTable(r) {\n  const rows = [\n    ['Firma', r.firma], ['Osoba', r.osoba], ['Telefon', `<a href=\"tel:${esc(r.telefon_norm)}\">${esc(formatPhone(r.telefon_norm) || r.telefon)}</a>`],\n    ['E-mail', r.email || '—'], ['Miasto / woj.', `${r.miasto || '—'} / ${r.wojewodztwo || 'nieustalone'}`],\n    ['Zainteresowanie', r.zainteresowanie], ['Szac. wartość', zl(r.szac_wartosc_pln)], ['Źródło', r.zrodlo], ['Wiadomość', r.wiadomosc],\n  ];\n  return '<table style=\"border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px\">' +\n    rows.map(([k, v]) => `<tr><td style=\"padding:4px 12px 4px 0;color:#555\">${k}</td><td style=\"padding:4px 0\"><b>${k === 'Telefon' ? v : esc(v)}</b></td></tr>`).join('') +\n    '</table>';\n}\nfunction wrapTestMode(email, cfg) {\n  if (String(cfg.TRYB_TESTOWY) !== 'true') return email;\n  return {\n    ...email,\n    to: cfg.TEST_INBOX,\n    cc: '',\n    subject: `[TEST → ${email.to}${email.cc ? ' cc ' + email.cc : ''}] ${email.subject}`,\n  };\n}\n\n// ---------------- Przetworzenie nowego zapytania (workflow A) ----------------\n\nfunction validateInput(inp) {\n  const errors = [];\n  if (!String(inp.firma || '').trim() && !String(inp.osoba || '').trim()) errors.push('Podaj firmę lub osobę kontaktową.');\n  const tel = normalizePhone(inp.telefon), mail = normalizeEmail(inp.email);\n  if (!tel && !mail) errors.push('Podaj poprawny telefon (9 cyfr) lub e-mail.');\n  if (String(inp.telefon || '').trim() && !tel) errors.push('Niepoprawny numer telefonu.');\n  if (String(inp.email || '').trim() && !mail) errors.push('Niepoprawny adres e-mail.');\n  return errors;\n}\n\nfunction buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {\n  const hMap = parseHandlowcy(handlowcyRows);\n  const telefon_norm = normalizePhone(inp.telefon);\n  const email_norm = normalizeEmail(inp.email);\n  const firma_klucz = companyKey(inp.firma);\n  const woj = normalizeWojewodztwo(inp.wojewodztwo, inp.miasto);\n  const dup = findDuplicate({ telefon_norm, email_norm, firma_klucz }, existing);\n\n  // Pewny duplikat zostaje u opiekuna oryginału (ciągłość relacji)\n  let routing, handlowiec;\n  if (dup && dup.typ === 'pewny' && dup.original) {\n    routing = dup.original.routing;\n    handlowiec = dup.original.handlowiec_id ? { id: dup.original.handlowiec_id, nazwa: dup.original.handlowiec } : null;\n  } else {\n    ({ routing, handlowiec } = route(woj.wojewodztwo, hMap));\n  }\n\n  const row = {\n    lead_id: opts.lead_id || nextLeadId(existing),\n    data_zgloszenia: opts.data_zgloszenia || now,\n    zrodlo: String(inp.zrodlo || 'formularz').trim(),\n    firma: String(inp.firma || '').trim(),\n    osoba: String(inp.osoba || '').trim(),\n    email: email_norm,\n    telefon: String(inp.telefon || '').trim(),\n    miasto: String(inp.miasto || '').trim(),\n    wojewodztwo: woj.wojewodztwo,\n    zainteresowanie: String(inp.zainteresowanie || '').trim(),\n    szac_wartosc_pln: Number(inp.szac_wartosc_pln) || 0,\n    wiadomosc: String(inp.wiadomosc || '').trim(),\n    telefon_norm,\n    firma_klucz,\n    wojewodztwo_zrodlo: woj.zrodlo,\n    routing,\n    handlowiec_id: handlowiec ? handlowiec.id : '',\n    handlowiec: handlowiec ? handlowiec.nazwa : '',\n    duplikat_of: dup && dup.original ? dup.original.lead_id : '',\n    duplikat_typ: dup ? dup.typ : '',\n    duplikat_powod: dup ? dup.powod : '',\n    status: 'nowy',\n    pierwszy_kontakt: '',\n    kontakt_kto: '',\n    proby: 0,\n    sla_poziom: 0,\n    token: makeToken(),\n    aktualizacja: now,\n  };\n  return { row, dup };\n}\n\nfunction processInquiry(inp, existing, handlowcyRows, cfg, now) {\n  const errors = validateInput(inp);\n  if (errors.length) return { valid: false, errors, response: { ok: false, errors } };\n\n  const { row, dup } = buildLeadRow(inp, existing, handlowcyRows, now);\n  const original = dup && dup.original;\n  const pewny = dup && dup.typ === 'pewny' && original;\n  const oryginalZamkniety = pewny && STATUSY_ZAMYKAJACE_SLA.includes(original.status);\n\n  // Przyciski statusu: przy pewnym duplikacie dotyczą leada pierwotnego\n  const target = pewny ? original : row;\n  const odbiorca = recipientFor(row, handlowcyRows, cfg);\n  const opis = `${row.firma || row.osoba} (${row.wojewodztwo || 'woj. nieustalone'})`;\n\n  let subject, intro;\n  if (pewny && oryginalZamkniety) {\n    subject = `Znany klient pisze ponownie: ${opis}`;\n    intro = `Ten klient był już obsłużony: ${original.lead_id} z ${original.data_zgloszenia}, status <b>${STATUS_ETYKIETY[original.status] || original.status}</b>` +\n      `${original.pierwszy_kontakt ? `, kontakt ${original.pierwszy_kontakt}` : ''}${original.kontakt_kto ? ` (${esc(original.kontakt_kto)})` : ''}. ` +\n      'Zanim zadzwonisz, sprawdź ustalenia z poprzedniej rozmowy, żeby nie podać innej ceny.';\n  } else if (pewny) {\n    subject = `⚠ PONOWIENIE – klient czeka: ${opis}`;\n    intro = `Klient pisze <b>drugi raz</b>. Pierwsze zapytanie ${original.lead_id} z ${original.data_zgloszenia} nadal bez kontaktu ` +\n      `(dopasowanie po: ${dup.powod}). Priorytet – zadzwoń jak najszybciej.`;\n  } else if (row.routing === 'bez_opiekuna') {\n    subject = `BEZ OPIEKUNA: ${row.wojewodztwo} – ${row.firma || row.osoba}, ${zl(row.szac_wartosc_pln)}`;\n    intro = `Województwo <b>${esc(row.wojewodztwo)}</b> nie ma przypisanego handlowca. Lead trafia do Pana, dopóki nie zapadnie decyzja, kto obsługuje ten region.`;\n  } else if (row.routing === 'do_ustalenia') {\n    subject = `Do przypisania: ${row.firma || row.osoba} – brak województwa`;\n    intro = 'Nie udało się ustalić województwa (brak w formularzu, nieznane miasto). Proszę ustalić i przypisać handlowca.';\n  } else {\n    subject = `Nowy lead: ${opis} – ${row.zainteresowanie || 'zapytanie'}, ${zl(row.szac_wartosc_pln)}`;\n    intro = row.wojewodztwo_zrodlo === 'miasto'\n      ? `Województwo ustalone automatycznie na podstawie miasta (${esc(row.miasto)}).`\n      : 'Nowe zapytanie z Twojego regionu. Cel: telefon w ciągu 4 godzin roboczych.';\n  }\n\n  const cc = [];\n  if (dup && dup.typ === 'mozliwy') {\n    intro += `<br><br>ℹ Możliwy duplikat ${dup.original ? dup.original.lead_id : ''} (${dup.powod}) – do potwierdzenia przez biuro.`;\n    if (cfg.ANIA_EMAIL && odbiorca.email !== cfg.ANIA_EMAIL) cc.push(cfg.ANIA_EMAIL);\n  }\n\n  const html = `<div style=\"font-family:Arial,sans-serif;font-size:14px;max-width:600px\">\n<p>${intro}</p>${leadTable(row)}\n<p style=\"margin-top:16px\"><b>Po telefonie kliknij jeden przycisk:</b><br>${statusButtons(cfg, target.lead_id, target.token, odbiorca.id)}</p>\n<p style=\"color:#888;font-size:12px\">${row.lead_id}${pewny ? ` → dotyczy ${original.lead_id}` : ''} · zgłoszono ${row.data_zgloszenia} · zegar SLA od ${slaStart(row.data_zgloszenia)}</p></div>`;\n\n  const email = wrapTestMode({ to: odbiorca.email, cc: cc.join(','), subject, html }, cfg);\n\n  const historia = [\n    { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})` },\n  ];\n  if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });\n  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });\n  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });\n\n  return {\n    valid: true,\n    row,\n    email,\n    historia,\n    response: {\n      ok: true,\n      lead_id: row.lead_id,\n      routing: row.routing,\n      przypisano: odbiorca.nazwa,\n      wojewodztwo: row.wojewodztwo,\n      wojewodztwo_zrodlo: row.wojewodztwo_zrodlo,\n      duplikat: dup ? { typ: dup.typ, powod: dup.powod, lead_id: dup.original ? dup.original.lead_id : '' } : null,\n      telefon_norm: row.telefon_norm,\n      sla_start: slaStart(row.data_zgloszenia),\n    },\n  };\n}\n\n// ---------------- Kliknięcie statusu (workflow B) ----------------\n\nfunction applyStatusClick(query, rows, now) {\n  const page = (title, msg, color) => `<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${title}</title></head>` +\n    `<body style=\"font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:90vh;margin:0\"><div style=\"text-align:center;padding:24px\">` +\n    `<div style=\"font-size:48px\">${color === 'ok' ? '✅' : '⚠️'}</div><h2>${title}</h2><p>${msg}</p></div></body></html>`;\n  const q = query || {};\n  const row = rows.find((r) => r && r.lead_id === q.lead);\n  if (!row) return { ok: false, html: page('Nie znaleziono leada', `Brak leada ${esc(q.lead)}.`, 'err') };\n  if (!q.t || String(row.token) !== String(q.t)) return { ok: false, html: page('Nieprawidłowy link', 'Link jest niepoprawny lub nieaktualny.', 'err') };\n  if (!STATUSY.includes(q.s) || q.s === 'nowy') return { ok: false, html: page('Nieznany status', esc(q.s), 'err') };\n\n  const zamyka = STATUSY_ZAMYKAJACE_SLA.includes(q.s);\n  const update = {\n    lead_id: row.lead_id,\n    status: q.s,\n    proby: (Number(row.proby) || 0) + 1,\n    aktualizacja: now,\n  };\n  if (zamyka && !row.pierwszy_kontakt) {\n    update.pierwszy_kontakt = now;\n    update.kontakt_kto = q.kto || row.handlowiec_id || '';\n  }\n  const czas = zamyka && !row.pierwszy_kontakt ? ` Czas do kontaktu: ${fmtGodziny(businessMinutes(row.data_zgloszenia, now))} roboczych.` : '';\n  return {\n    ok: true,\n    update,\n    historia: [{ czas: now, lead_id: row.lead_id, zdarzenie: 'status', szczegoly: `${q.s} (kliknął: ${q.kto || '—'})` }],\n    html: page('Zapisano', `${esc(row.firma)} – <b>${STATUS_ETYKIETY[q.s]}</b>.${czas}${q.s === 'nie_odebral' ? ' Lead dalej czeka na rozmowę, przypomnimy.' : ''}`, 'ok'),\n  };\n}\n\n// ---------------- Kontrola SLA (workflow C) ----------------\n\nfunction checkSla(rows, handlowcyRows, cfg, now) {\n  if (!isBusinessTime(now)) return []; // nie wysyłamy przypomnień w nocy ani w weekend\n  const out = [];\n  for (const r of rows) {\n    if (!r || !r.lead_id) continue;\n    if (STATUSY_ZAMYKAJACE_SLA.includes(r.status)) continue;\n    if (r.duplikat_typ === 'pewny') continue; // SLA liczone na leadzie pierwotnym\n    const min = businessMinutes(r.data_zgloszenia, now);\n    const level = slaLevel(min);\n    if (level <= (Number(r.sla_poziom) || 0)) continue;\n    const owner = recipientFor(r, handlowcyRows, cfg);\n    const marek = { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL };\n    out.push({\n      lead_id: r.lead_id, poziom: level, minuty: min,\n      do: level >= 3 ? marek : owner,\n      opiekun: owner,\n      wiersz: r,\n    });\n  }\n  return out;\n}\n\nconst SLA_OPIS = {\n  1: { tytul: 'Przypomnienie: leady czekają ponad 4 h robocze', kolor: '#b45309' },\n  2: { tytul: 'PO SLA: leady bez kontaktu ponad 1 dzień roboczy', kolor: '#b91c1c' },\n  3: { tytul: 'ESKALACJA: leady bez kontaktu ponad 2 dni robocze', kolor: '#7f1d1d' },\n};\nfunction groupSlaEmails(items, cfg) {\n  const groups = {};\n  items.forEach((it) => {\n    const key = `${it.do.email}|${it.poziom}`;\n    (groups[key] = groups[key] || { do: it.do, poziom: it.poziom, items: [] }).items.push(it);\n  });\n  return Object.values(groups).map((g) => {\n    const o = SLA_OPIS[g.poziom];\n    const lista = g.items.sort((a, b) => b.minuty - a.minuty).map((it) => {\n      const r = it.wiersz;\n      return `<div style=\"border:1px solid #ddd;border-radius:8px;padding:10px;margin:10px 0\">\n<b>${esc(r.firma || r.osoba)}</b> · ${esc(r.wojewodztwo || 'woj. nieustalone')} · ${zl(r.szac_wartosc_pln)}<br>\nTel. <a href=\"tel:${esc(r.telefon_norm)}\">${esc(formatPhone(r.telefon_norm) || r.telefon)}</a> · czeka <b>${fmtGodziny(it.minuty)}</b> roboczych · opiekun: ${esc(it.opiekun.nazwa)}${r.status === 'nie_odebral' ? ` · nie odebrał (${r.proby}x)` : ''}<br>\n<span style=\"color:#555\">${esc(r.wiadomosc)}</span><br>${statusButtons(cfg, r.lead_id, r.token, g.do.id)}</div>`;\n    }).join('');\n    const subject = `${o.tytul} (${g.items.length})`;\n    const html = `<div style=\"font-family:Arial,sans-serif;font-size:14px;max-width:640px\"><h3 style=\"color:${o.kolor}\">${o.tytul}</h3>${lista}</div>`;\n    return wrapTestMode({ to: g.do.email, cc: '', subject, html }, cfg);\n  });\n}\n\n// === Węzeł Code: \"Ustaw status\" (workflow B, tryb: Run Once for All Items) ===\nconst query = $('Webhook').first().json.query || {};\nconst rows = $('Pobierz lead').all().map((i) => i.json).filter((r) => r.lead_id);\n\nconst wynik = applyStatusClick(query, rows, nowWarsaw());\nreturn [{ json: wynik }];\n"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000029",
+      "name": "Czy poprawny?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c0ffee00-0000-4000-8000-000000000028",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000030",
+      "name": "Wiersz do aktualizacji",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Ustaw status').first().json.update }];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000031",
+      "name": "Aktualizuj lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1100,
+        -100
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "WKLEJ_ID_ARKUSZA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leady",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000032",
+      "name": "Historia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -100
+      ],
+      "parameters": {
+        "jsCode": "return $('Ustaw status').first().json.historia.map((h) => ({ json: h }));"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000033",
+      "name": "Zapisz historię",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1540,
+        -100
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "WKLEJ_ID_ARKUSZA",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Historia",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000034",
+      "name": "Pokaż potwierdzenie",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $('Ustaw status').first().json.html }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0000-4000-8000-000000000035",
+      "name": "Pokaż błąd",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        100
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Pobierz lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pobierz lead": {
+      "main": [
+        [
+          {
+            "node": "Ustaw status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ustaw status": {
+      "main": [
+        [
+          {
+            "node": "Czy poprawny?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Czy poprawny?": {
+      "main": [
+        [
+          {
+            "node": "Wiersz do aktualizacji",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pokaż błąd",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wiersz do aktualizacji": {
+      "main": [
+        [
+          {
+            "node": "Aktualizuj lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aktualizuj lead": {
+      "main": [
+        [
+          {
+            "node": "Historia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Historia": {
+      "main": [
+        [
+          {
+            "node": "Zapisz historię",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zapisz historię": {
+      "main": [
+        [
+          {
+            "node": "Pokaż potwierdzenie",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Warsaw"
+  },
+  "pinData": {}
+}
