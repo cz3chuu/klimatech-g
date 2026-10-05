@@ -24,6 +24,7 @@ Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy
 | Dwie osoby dzwonią i podają różne ceny | po rozmowie handlowiec odpisuje na WhatsAppie `1 + notatka`; przy kolejnym zgłoszeniu tego klienta powiadomienie pokazuje **kto rozmawiał, kiedy i co ustalił** |
 | Handlowcy czytają WhatsAppa | krótkie powiadomienie na WhatsApp (Green API) + mail jako kopia |
 | Telefon w ciągu doby, eskalacja po 2 dniach | SLA liczone w **minutach roboczych** (pn–pt 8–16, święta PL): przypomnienie po 4 h, „po SLA” po 1 dniu, eskalacja do Marka po 2 dniach |
+| Lead nie może „przeczekać” – także zaległy z importu albo zignorowany po eskalacji | **poranny raport** w dni robocze: każdy dostaje listę swoich otwartych leadów, Marek wszystko po SLA i regiony bez handlowca – codziennie, aż lead zostanie zamknięty |
 | Maile i telefony wpisywane przez biuro | zakładka arkusza **„Wpisz lead”** – Ania wpisuje wiersz, system odpisuje w wierszu ✅ / ⚠ / ❌ |
 | Szef ma widzieć wszystko | **mini CRM** (Supabase + prosta strona): lista leadów, karta klienta z osią czasu „kto, co, kiedy”, statystyki handlowców |
 
@@ -44,7 +45,7 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
                                                                │          │            ▼
  Zakładka „Wpisz lead” ───┐                                    │          │     [4] Synchronizacja z CRM ──► Supabase ──► mini CRM (crm/)
  WhatsApp „1 + notatka” ──┴─► [2] Obsługa co minutę ───────────┘          │
-                               (skrzynka, odpowiedzi, SLA)                │
+                               (skrzynka, odpowiedzi, SLA, raport)        │
  Przycisk w mailu ───────────► [3] Status z linku ────────────────────────┘
                                                                │
                                      WhatsApp (Green API) + Gmail do handlowca / Marka / Ani
@@ -57,7 +58,7 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 | # | Workflow | Wyzwalacz | Zadanie |
 |---|---|---|---|
 | 1 | **Przyjęcie leada** | webhook `POST /webhook/lead`, formularz `/form/klimatech` | nowe zgłoszenie → rdzeń → arkusz → WhatsApp + mail → odpowiedź (JSON dla strony albo strona podziękowania) |
-| 2 | **Obsługa co minutę** | co 1 min (+ test ręczny) | skrzynka „Wpisz lead” → odpowiedzi handlowców z WhatsAppa → SLA i eskalacje (co 15 min) |
+| 2 | **Obsługa co minutę** | co 1 min (+ test ręczny) | skrzynka „Wpisz lead” → odpowiedzi handlowców z WhatsAppa → SLA i eskalacje (co 15 min) → poranny raport (dni robocze, od 8:00) |
 | 3 | **Status z linku w mailu** | `GET /webhook/status?lead=…&t=…&s=…` | klik w przycisk statusu w mailu (Marek, Ania przy komputerze) |
 | 4 | **Synchronizacja z CRM** | co 1 min | arkusz → Supabase (lustro). Osobno, żeby awaria CRM nie zatrzymała leadów |
 
@@ -75,7 +76,8 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 8. **Powiadomienie.** WhatsApp do opiekuna (krótko: firma, telefon do kliknięcia, wartość, wiadomość, `🆔 L-041`, instrukcja odpowiedzi) + mail z przyciskami statusu. W trybie testowym wszystko idzie na numer i skrzynkę testową, a prawdziwy adresat jest w nagłówku `[TEST → Ewa Sowa]`.
 9. **Kontakt.** Handlowiec dzwoni i odpowiada na wiadomość: `1` dodzwoniłem się · `2` nie odebrał · `3` umówione · `4` niezainteresowany, opcjonalnie z notatką (`1 chce ofertę na 10 szt.`). Workflow 2 co minutę pobiera wiadomości, rozpoznaje leada po `🆔` z cytowanej wiadomości, zapisuje status, `pierwszy_kontakt`, notatkę i odsyła „✅ Zapisano”. „Nie odebrał” nie zatrzymuje zegara SLA.
 10. **SLA.** Co 15 min w godzinach pracy: lead bez kontaktu > 4 h → przypomnienie do opiekuna, > 1 dzień → „po SLA”, > 2 dni → **eskalacja do Marka**. Każdy poziom wysyłany raz, jedna zbiorcza wiadomość na odbiorcę. Lead z weekendu startuje w poniedziałek 8:00.
-11. **CRM.** Co minutę arkusz trafia do Supabase. Strona CRM pokazuje listę, kartę klienta (wszystkie zgłoszenia, ostatnie ustalenia, oś czasu) i statystyki handlowców.
+11. **Poranny raport.** W dzień roboczy, przy pierwszym przebiegu od 8:00: handlowiec dostaje mail (pełna lista z przyciskami statusu) i WhatsApp (5 najpilniejszych) ze **wszystkimi swoimi otwartymi leadami** (nowe i „nie odebrał”), Marek – wszystko po SLA oraz leady z regionów bez handlowca, Ania – leady do przypisania. Kolejność: najpierw **ponowienia** (klient pisał drugi raz), potem **wartość × dni robocze czekania**. Lead wraca w raporcie codziennie, aż ktoś go zamknie – dzięki temu nie ginie ani zaległość z importu (jej `sla_poziom` jest ustawiony na dzień importu, więc progi jej nie „obudzą”), ani lead zignorowany po eskalacji (poziom 3 to ostatnie powiadomienie progowe).
+12. **CRM.** Co minutę arkusz trafia do Supabase. Strona CRM pokazuje listę, kartę klienta (wszystkie zgłoszenia, ostatnie ustalenia, oś czasu) i statystyki handlowców.
 
 ---
 
@@ -91,6 +93,8 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 | Powtórne wysłanie | ten sam telefon, to samo źródło, ≤ 30 min | `powtorneWyslanie` |
 | Województwo z miasta | krótka lista miast (docelowo kod pocztowy / TERYT) | `MIASTA` |
 | Odpowiedź WhatsApp | cyfra 1–4 lub słowa („dodzwoniłem”, „nie odebrał”…), lead z cytatu `🆔` lub `L-041 1` | `parseWaReply` |
+| Poranny raport | dzień roboczy, pierwszy przebieg od 8:00, raz dziennie (data w pamięci workflow); otwarte = `nowy` / `nie_odebral`, bez pewnych duplikatów; Marek dostaje leady ≥ 1 dzień roboczy | `morningReport`, `otwarteLeady` |
+| Kolejność w raporcie | ponowienia → wartość × max(1, dni robocze czekania) → czas czekania | `otwarteLeady` |
 
 Wartości słownikowe w arkuszu: `routing` = `handlowiec | bez_opiekuna | do_ustalenia`, `duplikat_typ` = `pewny | mozliwy`, `status` = `nowy | nie_odebral | dodzwoniono | umowione | niezainteresowany`, `sla_poziom` = `0–3`.
 
@@ -113,7 +117,7 @@ supabase/schema.sql             tabele, indeksy, RLS (odczyt tylko po zalogowani
 data/klimatech-*.csv            załączniki od klienta (eksport arkusza, handlowcy)
 data/leady-import.csv …         wynik importu do zakładek Leady / Historia
 data/wpisz-lead-szablon.csv     zakładka „Wpisz lead” z 3 przykładowymi wierszami
-test/core.test.mjs              32 testy (node:test, bez zależności)
+test/core.test.mjs              35 testów (node:test, bez zależności)
 docs/                           raport z danych, propozycja dla klienta
 ```
 
@@ -126,7 +130,7 @@ docs/                           raport z danych, propozycja dla klienta
 Wymagania: Node.js 20+, n8n (testowane na 1.116 w Dockerze, strefa `Europe/Warsaw`), konto Google. Opcjonalnie: Green API (WhatsApp), Supabase (CRM). Zależności npm: brak.
 
 ```bash
-npm test                    # 32 testy rdzenia na danych z załącznika
+npm test                    # 35 testów rdzenia na danych z załącznika
 npm run import              # (opcjonalnie) ponowne wygenerowanie data/*-import.csv i docs/raport.md
 ```
 
@@ -181,6 +185,7 @@ Darmowa instancja *Developer* na console.green-api.com, zeskanowany QR telefonem
 | Wpis biura | wiersz w „Wpisz lead” | po ≤ 1 min kolumna `wynik`: `✅ L-0xx → …` / `⚠ ponowienie` / `❌ popraw` |
 | Kontakt z WhatsAppa | odpowiedz na wiadomość z leadem: `1 wysłałem cennik` | po ≤ 1 min „✅ Zapisano…📝”, w arkuszu status, `pierwszy_kontakt`, notatka |
 | SLA poza godzinami | w workflow 2 → *Konfiguracja* → `TERAZ = 2026-10-05 10:00` → *Test ręczny* | przypomnienia i eskalacje do Marka (potem wyczyść `TERAZ`) |
+| Poranny raport | w workflow 2 → *Konfiguracja* → `RAPORT_TERAZ = true` (i ewentualnie `TERAZ` w godzinach pracy) → *Test ręczny* | mail i WhatsApp `Poranny raport: …` do każdego handlowca i do Marka; normalnie raz dziennie od 8:00 (potem wyczyść pola) |
 | CRM | `npm run crm` | nowy lead na górze listy, karta z osią czasu |
 
 Przed demo: ponownie zaimportuj CSV do arkusza (czyści testowe leady); CRM wyczyści się sam w ciągu minuty.
@@ -195,7 +200,7 @@ Przed demo: ponownie zaimportuj CSV do arkusza (czyści testowe leady); CRM wycz
 - **Jeden rdzeń, wiele wejść.** Formularz, webhook i wpis biura przechodzą przez tę samą funkcję – duplikaty i przydział działają identycznie, logika jest testowana bez n8n.
 - **Biuro wpisuje do zakładki „Wpisz lead”, nie do „Leady”.** Wiersz wpisany wprost do *Leady* ominąłby duplikaty, przydział i powiadomienie.
 - **CRM osobno od leadów.** Awaria Supabase nie może zatrzymać przypomnień SLA.
-- **Import historii ustawia `sla_poziom` na stan z dnia importu**, żeby pierwszy przebieg nie wysłał kilkunastu zaległych przypomnień naraz.
+- **Import historii ustawia `sla_poziom` na stan z dnia importu**, żeby pierwszy przebieg nie wysłał kilkunastu zaległych przypomnień naraz. Zaległości nie giną: zbiera je **poranny raport** – jedno zestawienie zamiast lawiny pojedynczych maili.
 
 ## 10. Znane ograniczenia makiety (świadome)
 
