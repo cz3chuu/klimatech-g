@@ -136,7 +136,7 @@ ${czeka.sort((a, b) => b.min - a.min).slice(0, 10).map(({ r, min }) => `| ${r.le
 }
 
 // ---- uruchomienie z CLI ----
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const i = process.argv.indexOf('--now');
   const now = i > -1 ? process.argv[i + 1] : core.nowWarsaw();
   const leady = parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8'));

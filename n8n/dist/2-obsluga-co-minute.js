@@ -746,11 +746,89 @@ function groupSlaWhatsapp(items, cfg) {
   }).filter(Boolean);
 }
 
+// ---------------- Poranny raport (dni robocze, pierwszy przebieg po 8:00) ----------------
+// Domyka dwie dziury SLA: (1) leady z importu mają sla_poziom ustawiony na dzień importu, więc progi ich nie obudzą,
+// (2) po eskalacji (poziom 3) nie ma kolejnych powiadomień. Lead jest w raporcie codziennie, dopóki ktoś go nie zamknie.
+// Kolejność: ponowienia (klient pisał drugi raz) -> wynik = wartość × dni robocze czekania.
+function otwarteLeady(rows, now) {
+  const ponowienia = {};
+  rows.filter((r) => r.duplikat_typ === 'pewny' && r.duplikat_of).forEach((r) => { ponowienia[r.duplikat_of] = (ponowienia[r.duplikat_of] || 0) + 1; });
+  return rows
+    .filter((r) => r.lead_id && r.duplikat_typ !== 'pewny' && !STATUSY_ZAMYKAJACE_SLA.includes(r.status))
+    .map((r) => {
+      const minuty = businessMinutes(r.data_zgloszenia, now);
+      const dni = Math.max(1, minuty / 480);
+      return { wiersz: r, minuty, ponowienia: ponowienia[r.lead_id] || 0, wynik: Math.round((Number(r.szac_wartosc_pln) || 0) * dni) };
+    })
+    .sort((a, b) => (b.ponowienia > 0) - (a.ponowienia > 0) || b.wynik - a.wynik || b.minuty - a.minuty);
+}
+// 1 lead, 2–4 leady, 5+ leadów (12–14 leadów)
+function leadyOdm(n, przym) {
+  const forma = n === 1 ? 1 : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 2 : 3;
+  const p = przym ? { 1: przym + 'y ', 2: przym + 'e ', 3: przym + 'ych ' }[forma] : '';
+  return `${n} ${p}${{ 1: 'lead', 2: 'leady', 3: 'leadów' }[forma]}`;
+}
+function fmtCzeka(min) { return min >= 480 ? `${Math.floor(min / 480)} d ${Math.floor((min % 480) / 60)} h rob.` : `${fmtGodziny(min)} rob.`; }
+
+function morningReport(rows, handlowcyRows, cfg, now) {
+  const otwarte = otwarteLeady(rows, now);
+  const marek = marekOf(cfg);
+  const grupy = {};
+  const dodaj = (odbiorca, it) => { (grupy[odbiorca.id] = grupy[odbiorca.id] || { do: odbiorca, items: [] }).items.push(it); };
+  otwarte.forEach((it) => {
+    const opiekun = recipientFor(it.wiersz, handlowcyRows, cfg);
+    dodaj(opiekun, { ...it, opiekun });
+    // Marek widzi wszystko po SLA (> 1 dzień roboczy), także leady handlowców
+    if (opiekun.id !== marek.id && it.minuty >= SLA_PROGI[1]) dodaj(marek, { ...it, opiekun });
+  });
+  const suma = (items) => zl(items.reduce((s, it) => s + (Number(it.wiersz.szac_wartosc_pln) || 0), 0));
+  const emaile = [], whatsapp = [];
+  Object.values(grupy).forEach((g) => {
+    const czyMarek = g.do.id === marek.id;
+    const tytul = czyMarek ? `Poranny raport: ${leadyOdm(g.items.length)} po SLA lub bez handlowca (${suma(g.items)})`
+      : `Poranny raport: ${leadyOdm(g.items.length, 'otwart')} do telefonu (${suma(g.items)})`;
+    const wiersze = g.items.map((it, i) => {
+      const r = it.wiersz, p = slaLevel(it.minuty);
+      const kolor = ['#15803d', '#b45309', '#b91c1c', '#7f1d1d'][p];
+      return `<tr style="border-top:1px solid #e1e6eb">
+<td style="padding:8px 6px;color:#888">${i + 1}.</td>
+<td style="padding:8px 6px"><b>${esc(r.firma || r.osoba)}</b>${it.ponowienia ? ` <span style="background:#fbefdc;color:#b45309;border-radius:6px;padding:1px 6px;font-size:12px">pisał ${it.ponowienia + 1}×</span>` : ''}<br>
+<span style="color:#555;font-size:13px">${esc(r.lead_id)} · ${esc(r.wojewodztwo || 'woj. nieustalone')}${czyMarek ? ` · opiekun: ${esc(it.opiekun.nazwa)}` : ''}${r.status === 'nie_odebral' ? ` · nie odebrał (${esc(r.proby)}×)` : ''}</span>
+${r.notatka ? `<br><span style="color:#555;font-size:13px">📝 ${esc(r.notatka)}</span>` : ''}</td>
+<td style="padding:8px 6px;white-space:nowrap"><a href="tel:${esc(r.telefon_norm)}">${esc(formatPhone(r.telefon_norm) || r.telefon || r.email)}</a></td>
+<td style="padding:8px 6px;white-space:nowrap;text-align:right">${zl(r.szac_wartosc_pln)}</td>
+<td style="padding:8px 6px;white-space:nowrap;color:${kolor};font-weight:bold">${fmtCzeka(it.minuty)}</td></tr>
+<tr><td></td><td colspan="4" style="padding:0 6px 8px">${statusButtons(cfg, r.lead_id, r.token, g.do.id)}</td></tr>`;
+    }).join('');
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;max-width:760px">
+<h3 style="margin:0 0 4px">${esc(tytul)}</h3>
+<p style="margin:0 0 12px;color:#555">Lista wraca codziennie, dopóki lead nie zostanie zamknięty (dodzwoniono / umówione / niezainteresowany). Na górze ponowienia, potem wartość × czas czekania.</p>
+<table style="border-collapse:collapse;width:100%">${wiersze}</table></div>`;
+    emaile.push(wrapTestMode({ to: g.do.email, cc: '', subject: tytul, html }, cfg));
+
+    if (kanalWa(cfg)) {
+      const top = g.items.slice(0, 5).map((it, i) => {
+        const r = it.wiersz;
+        return `${i + 1}. ${it.ponowienia ? '⚠️ ' : ''}*${r.firma || r.osoba}* · ${zl(r.szac_wartosc_pln)} · czeka ${fmtCzeka(it.minuty)}\n📞 ${formatPhone(r.telefon_norm) || r.telefon || r.email} · 🆔 ${r.lead_id}`;
+      }).join('\n\n');
+      const reszta = g.items.length > 5 ? `\n\n…i jeszcze ${g.items.length - 5} – pełna lista w mailu.` : '';
+      const naglowek = czyMarek ? `☀️ *Poranny raport – po SLA / bez handlowca: ${g.items.length}* (${suma(g.items)})`
+        : `☀️ *Dzień dobry! Otwarte leady: ${g.items.length}* (${suma(g.items)})`;
+      const wa = wrapTestModeWa({ chatId: waChatId(g.do.whatsapp), nazwa: g.do.nazwa,
+        message: `${naglowek}\n\n${top}${reszta}\n────────\nPo rozmowie odpowiedz: *numer leada + cyfra*, np. „${g.items[0].wiersz.lead_id} 1”` }, cfg);
+      if (wa) whatsapp.push(wa);
+    }
+  });
+  const historia = Object.values(grupy).map((g) => ({ czas: now, lead_id: '', zdarzenie: 'raport', kto: 'system',
+    szczegoly: `poranny raport do ${g.do.nazwa}: ${g.items.length} leadów (${g.items.map((it) => it.wiersz.lead_id).join(', ')})` }));
+  return { emaile, whatsapp, historia, otwarte: otwarte.length };
+}
+
 // ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------
 // Jeden przebieg, jeden stan: skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
 // Kolejne kroki widzą zmiany poprzednich (np. lead ze skrzynki potwierdzony w tej samej minucie).
 const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po SLA (1 dzień)', 3: 'eskalacja do Marka (2 dni)' };
-function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false }) {
+function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false, raport = false }) {
   const out = { nowe_leady: [], aktualizacje: [], historia: [], emaile: [], whatsapp: [], wyniki: [] };
   const mail = String(cfg.KANAL || 'mail') !== 'whatsapp';
 
@@ -787,6 +865,14 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
     out.whatsapp.push(...groupSlaWhatsapp(items, cfg));
   }
 
+  // 4. Poranny raport (raz dziennie): lista otwartych leadów, aż ktoś je zamknie – na stanie po krokach 1–3
+  if (raport) {
+    const r = morningReport(stan, handlowcy, cfg, now);
+    if (mail) out.emaile.push(...r.emaile);
+    out.whatsapp.push(...r.whatsapp);
+    out.historia.push(...r.historia);
+  }
+
   // Zmiany leadów dodanych w tym przebiegu trafiają od razu do nowego wiersza (jeszcze go nie ma w arkuszu)
   out.nowe_leady = out.nowe_leady.map((r) => (zmiany[r.lead_id] ? { ...r, ...zmiany[r.lead_id] } : r));
   out.nowe_leady.forEach((r) => { delete zmiany[r.lead_id]; });
@@ -796,7 +882,7 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
 }
 
 // === Węzeł Code: "Obsłuż" (workflow 2 – Obsługa co minutę, tryb: Run Once for All Items) ===
-// Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze).
+// Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze) -> poranny raport (raz dziennie).
 // TERAZ w Konfiguracji (np. "2026-10-05 10:00") symuluje czas – do demo poza godzinami pracy.
 const cfg = $('Konfiguracja').first().json;
 const now = String(cfg.TERAZ || '').trim() || nowWarsaw();
@@ -813,5 +899,12 @@ const wiadomosci = unikalne.filter((m) => !zrobione.has(m.idMessage)).sort((a, b
 pamiec.wa = [...zrobione, ...wiadomosci.map((m) => m.idMessage)].slice(-500);
 
 const sla = $execution.mode === 'manual' || !!String(cfg.TERAZ || '').trim() || Number(now.slice(14, 16)) % 15 === 0;
-const wynik = processCycle({ wpisy, wiadomosci, rows, handlowcy, cfg, now, sla });
+
+// Poranny raport: raz na dzień roboczy, przy pierwszym przebiegu od 8:00 (gdy n8n o 8:00 nie działał – przy następnym).
+// RAPORT_TERAZ = true w Konfiguracji wymusza raport (test ręczny).
+const dzis = now.slice(0, 10);
+const raport = isBusinessTime(now) && (pamiec.raport !== dzis || String(cfg.RAPORT_TERAZ) === 'true');
+if (raport) pamiec.raport = dzis;
+
+const wynik = processCycle({ wpisy, wiadomosci, rows, handlowcy, cfg, now, sla, raport });
 return wynik.cokolwiek ? [{ json: wynik }] : [];

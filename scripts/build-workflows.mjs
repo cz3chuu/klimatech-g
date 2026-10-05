@@ -201,7 +201,7 @@ function build(c) {
   const galaz = (nazwa, y, pole) => code(nazwa, [X(8), y], `return ${OB}.${pole}.map((x) => ({ json: x }));`);
   const W2 = wf('KlimatechWfC0001', 'Klimatech 2 – Obsługa co minutę', [
     ...trigger1min(),
-    konfiguracja([X(1), 0], [['TERAZ', '']]),
+    konfiguracja([X(1), 0], [['TERAZ', ''], ['RAPORT_TERAZ', '']]),
     getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(3), 0], 'Leady'),
     getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead', { onError: 'continueRegularOutput' }), // brak zakładki nie zatrzymuje SLA

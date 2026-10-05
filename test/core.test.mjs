@@ -300,3 +300,45 @@ test('Formularz klienta – podziękowanie z numerem, po godzinach termin, powt�
   // po 30 minutach ten sam numer = prawdziwe ponowienie
   assert.equal(core.processInquiry(inp, [...rows, r1.row], handlowcy, cfgWa, '2026-10-05 10:45').response.duplikat.typ, 'pewny');
 });
+
+// --- poranny raport: zaległe leady wracają codziennie, aż ktoś je zamknie ---
+test('Raport: kolejność – ponowienia, potem wartość × dni czekania; zamknięte i duplikaty pominięte', () => {
+  const lista = core.otwarteLeady(rows, '2026-10-05 08:00');
+  const ids = lista.map((it) => it.wiersz.lead_id);
+  assert.equal(lista.length, 25); // tyle leadów bez kontaktu w eksporcie
+  assert.deepEqual(ids.slice(0, 3).sort(), ['L-007', 'L-015', 'L-031']); // klienci, którzy pisali drugi raz
+  assert.ok(!ids.includes('L-023') && !ids.includes('L-001')); // ponowienie liczone na oryginale, zamknięte pominięte
+  assert.ok(ids.indexOf('L-009') < ids.indexOf('L-013')); // 180 tys. przed 6 tys., choć oba czekają długo
+});
+test('Raport: każdy handlowiec dostaje swoje, Marek po SLA i regiony bez handlowca – jedna wiadomość na odbiorcę', () => {
+  const r = core.morningReport(rows, handlowcy, cfgWa, '2026-10-05 08:00');
+  const tematy = r.emaile.map((e) => e.subject);
+  assert.equal(r.emaile.length, r.whatsapp.length);
+  assert.ok(tematy.some((t) => /\[TEST → marek@klimatech\.example\] Poranny raport: \d+ leadów po SLA lub bez handlowca/.test(t)));
+  assert.ok(tematy.some((t) => /t\.wrona@klimatech\.example\] Poranny raport: 4 otwarte leady do telefonu/.test(t)));
+  assert.ok(tematy.some((t) => /m\.kruk@klimatech\.example\] Poranny raport: 1 otwarty lead do telefonu/.test(t)));
+  const marek = r.emaile.find((e) => /marek@/.test(e.subject)).html;
+  assert.match(marek, /Zielona Energia Gorzów/); // lubuskie – bez handlowca
+  assert.match(marek, /Instal-Tech Kowalczyk/); // lead Tomasza po SLA też u Marka
+  assert.match(r.whatsapp[0].message, /☀️/);
+  // lead zamknięty rano znika z raportu
+  const poTelefonie = rows.map((x) => (x.lead_id === 'L-009' ? { ...x, status: 'dodzwoniono', pierwszy_kontakt: '2026-10-05 07:50' } : x));
+  assert.doesNotMatch(core.morningReport(poTelefonie, handlowcy, cfgWa, '2026-10-05 08:00').emaile.map((e) => e.html).join(''), /Zielona Energia Gorzów/);
+});
+test('n8n/dist: raport raz dziennie (pamięć daty), poza godzinami pracy brak, RAPORT_TERAZ wymusza', () => {
+  const code = readFileSync('n8n/dist/2-obsluga-co-minute.js', 'utf8');
+  const uruchom = (cfgX, pamiec) => {
+    const nodes = { Konfiguracja: [cfgX], 'Pobierz skrzynkę': [], 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy, 'Pobierz wiadomości': [], 'Pobierz wysłane': [] };
+    const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+    const out = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' });
+    return out.length ? out[0].json : null;
+  };
+  const pamiec = {};
+  const p1 = uruchom({ ...cfgWa, TERAZ: '2026-10-05 08:07' }, pamiec);
+  assert.ok(p1.historia.some((h) => h.zdarzenie === 'raport'));
+  assert.equal(pamiec.raport, '2026-10-05');
+  const p2 = uruchom({ ...cfgWa, TERAZ: '2026-10-05 08:08' }, pamiec);
+  assert.ok(!p2 || !p2.historia.some((h) => h.zdarzenie === 'raport')); // drugi raz tego dnia – nie
+  assert.equal(uruchom({ ...cfgWa, TERAZ: '2026-10-10 09:00' }, {})?.historia.some((h) => h.zdarzenie === 'raport') || false, false); // sobota
+  assert.ok(uruchom({ ...cfgWa, TERAZ: '2026-10-05 08:09', RAPORT_TERAZ: 'true' }, pamiec).historia.some((h) => h.zdarzenie === 'raport'));
+});

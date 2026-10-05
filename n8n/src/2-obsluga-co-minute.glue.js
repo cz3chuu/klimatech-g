@@ -1,5 +1,5 @@
 // === Węzeł Code: "Obsłuż" (workflow 2 – Obsługa co minutę, tryb: Run Once for All Items) ===
-// Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze).
+// Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze) -> poranny raport (raz dziennie).
 // TERAZ w Konfiguracji (np. "2026-10-05 10:00") symuluje czas – do demo poza godzinami pracy.
 const cfg = $('Konfiguracja').first().json;
 const now = String(cfg.TERAZ || '').trim() || nowWarsaw();
@@ -16,5 +16,12 @@ const wiadomosci = unikalne.filter((m) => !zrobione.has(m.idMessage)).sort((a, b
 pamiec.wa = [...zrobione, ...wiadomosci.map((m) => m.idMessage)].slice(-500);
 
 const sla = $execution.mode === 'manual' || !!String(cfg.TERAZ || '').trim() || Number(now.slice(14, 16)) % 15 === 0;
-const wynik = processCycle({ wpisy, wiadomosci, rows, handlowcy, cfg, now, sla });
+
+// Poranny raport: raz na dzień roboczy, przy pierwszym przebiegu od 8:00 (gdy n8n o 8:00 nie działał – przy następnym).
+// RAPORT_TERAZ = true w Konfiguracji wymusza raport (test ręczny).
+const dzis = now.slice(0, 10);
+const raport = isBusinessTime(now) && (pamiec.raport !== dzis || String(cfg.RAPORT_TERAZ) === 'true');
+if (raport) pamiec.raport = dzis;
+
+const wynik = processCycle({ wpisy, wiadomosci, rows, handlowcy, cfg, now, sla, raport });
 return wynik.cokolwiek ? [{ json: wynik }] : [];
