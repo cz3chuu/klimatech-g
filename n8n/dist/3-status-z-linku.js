@@ -859,7 +859,7 @@ function leadyOdm(n, przym) {
   const p = przym ? { 1: przym + 'y ', 2: przym + 'e ', 3: przym + 'ych ' }[forma] : '';
   return `${n} ${p}${{ 1: 'lead', 2: 'leady', 3: 'leadów' }[forma]}`;
 }
-function fmtCzeka(min) { return min >= 480 ? `${Math.floor(min / 480)} d ${Math.floor((min % 480) / 60)} h rob.` : `${fmtGodziny(min)} rob.`; }
+function fmtCzeka(min) { if (min < 480) return `${fmtGodziny(min)} rob.`; const d = Math.floor(min / 480), h = Math.floor((min % 480) / 60); return `${d} ${d === 1 ? "dzień" : "dni"}${h ? ` ${h} h` : ""} rob.`; }
 
 function morningReport(rows, handlowcyRows, cfg, now) {
   const otwarte = otwarteLeady(rows, now);
@@ -913,6 +913,181 @@ ${r.notatka ? `<br><span style="color:#555;font-size:13px">📝 ${esc(r.notatka)
   const historia = Object.values(grupy).map((g) => ({ czas: now, lead_id: '', zdarzenie: 'raport', kto: 'system',
     szczegoly: `poranny raport do ${g.do.nazwa}: ${g.items.length} leadów (${g.items.map((it) => it.wiersz.lead_id).join(', ')})` }));
   return { emaile, whatsapp, historia, otwarte: otwarte.length };
+}
+
+// ---------------- Poranne zestawienia (punkt 5 klienta): osobiste dla handlowców i zbiorcze dla Marka ----------------
+// Okno „wczoraj” = od 8:00 poprzedniego dnia roboczego do teraz (w poniedziałek obejmuje piątek i weekend).
+// Handlowiec: przypomnij dziś · nowe · jeszcze nieobsłużone · wczoraj obsłużone. Marek: liczby zespołu, tabela, eskalacje, duże leady.
+const DNI_TYG = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
+const MIES = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia'];
+function dzienRoboczyPrzed(dataStr) {
+  const d = parseLocal(String(dataStr).slice(0, 10) + ' 00:00');
+  do { d.setUTCDate(d.getUTCDate() - 1); } while (!isBusinessDay(d));
+  return d.toISOString().slice(0, 10);
+}
+function dataSlownie(s) { const d = parseLocal(s); return d ? `${DNI_TYG[d.getUTCDay()]}, ${d.getUTCDate()} ${MIES[d.getUTCMonth()]}` : ''; }
+function terminSlownie(termin, now) {
+  if (!termin) return '';
+  const dzis = String(now).slice(0, 10), jutro = dzienRoboczyPo(now, 1), dzien = termin.slice(0, 10);
+  if (dzien === dzis) return 'dziś do 16:00';
+  if (dzien === jutro) return `${DNI_TYG[parseLocal(termin).getUTCDay()]} do 16:00`;
+  return `${termin.slice(8, 10)}.${termin.slice(5, 7)} do 16:00`;
+}
+function statusLinki(cfg, r, kto) {
+  const link = (s, t) => `<a href="${esc(cfg.STATUS_URL)}?lead=${encodeURIComponent(r.lead_id)}&t=${r.token}&s=${s}&kto=${encodeURIComponent(kto)}" style="color:#0e5c88;text-decoration:none;font-weight:bold">${t}</a>`;
+  return [link('dodzwoniono', '✅ Dodzwoniłem się'), link('nie_odebral', '📵 Nie odebrał'), link('umowione', '📅 Umówione'), link('niezainteresowany', '✖ Niezainteresowany')].join(' &nbsp;·&nbsp; ');
+}
+
+// Dane do zestawień – bez HTML, testowalne
+function danePoranne(rows, historia, handlowcyRows, cfg, now) {
+  const od = `${dzienRoboczyPrzed(now)} 08:00`;
+  const wOknie = (t) => !!t && String(t).slice(0, 16) >= od && String(t).slice(0, 16) < String(now).slice(0, 16);
+  const ponowienia = {};
+  rows.filter((r) => r.duplikat_typ === 'pewny' && r.duplikat_of).forEach((r) => { ponowienia[r.duplikat_of] = (ponowienia[r.duplikat_of] || 0) + 1; });
+  const byId = Object.fromEntries(rows.map((r) => [r.lead_id, r]));
+  const prog = Number(cfg.PROG_LIDER) || 50000;
+  const dzis = String(now).slice(0, 10);
+
+  const otwarte = otwarteLeady(rows, now).map((it) => {
+    const r = it.wiersz, poziom = slaLevelAt(r.data_zgloszenia, now), termin = terminDoby(r.data_zgloszenia);
+    const nowy = wOknie(r.data_zgloszenia);
+    let powod = '';
+    if (poziom >= 3) powod = `eskalacja – bez kontaktu ${fmtCzeka(it.minuty)}`;
+    else if (poziom === 2) powod = `po terminie (minął ${termin.slice(8, 10)}.${termin.slice(5, 7)} 16:00)`;
+    else if (termin.slice(0, 10) === dzis) powod = 'termin mija dziś o 16:00';
+    else if (r.status === 'nie_odebral') powod = `nie odebrał (${r.proby || 1}×) – spróbuj ponownie`;
+    return { ...it, poziom, termin, nowy, powod, naDzis: !!powod, opiekun: recipientFor(r, handlowcyRows, cfg) };
+  });
+
+  // Obsłużone w oknie: zmiany statusu z historii (ostatnia na lead), wynik i notatka z aktualnego wiersza
+  const ostatnie = {};
+  historia.filter((h) => h.zdarzenie === 'status' && wOknie(h.czas) && byId[h.lead_id])
+    .sort((a, b) => String(a.czas).localeCompare(String(b.czas))).forEach((h) => { ostatnie[h.lead_id] = h; });
+  const obsluzone = Object.values(ostatnie).map((h) => {
+    const r = byId[h.lead_id];
+    const pierwszyWOknie = wOknie(r.pierwszy_kontakt);
+    return {
+      wiersz: r, kto: h.kto || r.handlowiec, czas: h.czas, opiekun: recipientFor(r, handlowcyRows, cfg),
+      reakcja: pierwszyWOknie ? businessMinutes(r.data_zgloszenia, r.pierwszy_kontakt) : null,
+      wTerminie: pierwszyWOknie ? String(r.pierwszy_kontakt).slice(0, 16) <= terminDoby(r.data_zgloszenia) : null,
+    };
+  }).sort((a, b) => String(b.czas).localeCompare(String(a.czas)));
+
+  const nowe = rows.filter((r) => wOknie(r.data_zgloszenia) && r.duplikat_typ !== 'pewny');
+  return { od, now, otwarte, obsluzone, nowe, ponowienia, prog, byId };
+}
+
+function sekcja(tytul, kolor, licznik, tresc, pusto) {
+  return `<tr><td style="padding:22px 24px 6px"><div style="font:bold 15px Arial,sans-serif;color:${kolor}">${tytul} <span style="color:#8a96a1;font-weight:normal">(${licznik})</span></div></td></tr>
+<tr><td style="padding:0 24px">${licznik ? tresc : `<div style="font:14px Arial,sans-serif;color:#8a96a1;padding:6px 0">${pusto}</div>`}</td></tr>`;
+}
+function ramkaMaila(naglowek, podtytul, kafle, sekcje) {
+  return `<div style="background:#f2f4f6;padding:20px 0"><table role="presentation" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #e1e6eb">
+<tr><td style="padding:22px 24px 16px;border-bottom:1px solid #e1e6eb"><div style="font:bold 20px Arial,sans-serif;color:#142029">${naglowek}</div>
+<div style="font:13px Arial,sans-serif;color:#5d6a76;margin-top:4px">${podtytul}</div></td></tr>
+<tr><td style="padding:16px 18px 0"><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%"><tr>${kafle.map(([l, w, kolor]) =>
+  `<td style="padding:0 6px"><div style="background:#f6f8fa;border:1px solid #e1e6eb;border-radius:10px;padding:10px 12px"><div style="font:bold 22px Arial,sans-serif;color:${kolor || '#142029'}">${w}</div><div style="font:12px Arial,sans-serif;color:#5d6a76">${l}</div></div></td>`).join('')}</tr></table></td></tr>
+${sekcje.join('\n')}
+<tr><td style="padding:22px 24px;font:12px Arial,sans-serif;color:#8a96a1;border-top:1px solid #e1e6eb">Zestawienie wysyłane w dni robocze o 8:00. Czas liczony w godzinach pracy (pn–pt 8–16). Termin pierwszego telefonu: do 16:00 następnego dnia roboczego po zgłoszeniu.</td></tr>
+</table></div>`;
+}
+const badge = (t, kolor, tlo) => `<span style="display:inline-block;font:bold 11px Arial,sans-serif;color:${kolor};background:${tlo};border-radius:6px;padding:2px 6px;margin-left:4px">${t}</span>`;
+function wierszLeada(it, cfg, kto, dodatki = '') {
+  const r = it.wiersz;
+  const kolor = it.poziom >= 3 ? '#7c1515' : it.poziom === 2 ? '#b42318' : it.powod && it.powod.startsWith('termin') ? '#b45309' : '#5d6a76';
+  return `<div style="border:1px solid #e1e6eb;border-left:4px solid ${kolor};border-radius:8px;padding:10px 12px;margin:8px 0;font:14px Arial,sans-serif;color:#142029">
+<b>${esc(r.firma || r.osoba)}</b>${it.ponowienia ? badge(`pisał ${it.ponowienia + 1}×`, '#b45309', '#fbefdc') : ''}${it.nowy ? badge('NOWY', '#0e5c88', '#e2eef6') : ''}${Number(r.szac_wartosc_pln) > (Number(cfg.PROG_LIDER) || 50000) ? badge('💰 duży', '#4b45a1', '#eae9f9') : ''}
+<span style="float:right;font-weight:bold">${zl(r.szac_wartosc_pln)}</span><br>
+<span style="color:#5d6a76;font-size:13px">${esc(r.lead_id)} · ${esc(r.miasto || '')}${r.wojewodztwo ? ', ' + esc(r.wojewodztwo) : ''} · 📞 <a href="tel:${esc(r.telefon_norm)}" style="color:#142029">${esc(formatPhone(r.telefon_norm) || r.telefon || r.email)}</a>${dodatki}</span>
+${it.powod ? `<br><span style="color:${kolor};font-size:13px;font-weight:bold">${esc(it.powod)}</span>` : ''}
+${r.notatka ? `<br><span style="color:#5d6a76;font-size:13px">📝 ${esc(r.notatka)}</span>` : ''}
+${kto ? `<div style="margin-top:6px;font-size:12px">${statusLinki(cfg, r, kto)}</div>` : ''}</div>`;
+}
+function wierszObsluzony(o, pokazKto) {
+  const r = o.wiersz;
+  const termin = o.wTerminie === null ? '' : o.wTerminie ? badge('w terminie', '#17803d', '#e3f3e8') : badge('po terminie', '#b42318', '#fae5e2');
+  return `<div style="padding:7px 0;border-bottom:1px solid #eef1f4;font:14px Arial,sans-serif;color:#142029">✅ <b>${esc(r.firma || r.osoba)}</b> – ${esc(STATUS_ETYKIETY[r.status] || r.status)}${termin}
+<span style="color:#5d6a76;font-size:13px"> · ${esc(r.lead_id)}${pokazKto ? ` · ${esc(o.kto)}` : ''}${o.reakcja !== null ? ` · reakcja ${fmtCzeka(o.reakcja)}` : ''}</span>
+${r.notatka ? `<br><span style="color:#5d6a76;font-size:13px">📝 ${esc(r.notatka)}</span>` : ''}</div>`;
+}
+
+function zestawienieHandlowca(osoba, d, cfg) {
+  const moje = d.otwarte.filter((it) => it.opiekun.id === osoba.id);
+  // Rozłącznie: starsze wymagające działania | nowe (wszystkie, z terminem) | starsze w terminie
+  const naDzis = moje.filter((it) => !it.nowy && it.naDzis);
+  const nowe = moje.filter((it) => it.nowy);
+  const pozostale = moje.filter((it) => !it.nowy && !it.naDzis);
+  const doTelefonuDzis = moje.filter((it) => it.naDzis); // też nowe z terminem dziś
+  const kolejnosc = [...doTelefonuDzis].sort((a, b) => b.poziom - a.poziom || (b.ponowienia > 0) - (a.ponowienia > 0) || b.wynik - a.wynik);
+  const obsl = d.obsluzone.filter((o) => o.opiekun.id === osoba.id);
+  const imie = osoba.nazwa.split(' ')[0];
+  const html = ramkaMaila(`☀️ Dzień dobry, ${esc(imie)}!`, `Twoje leady · ${dataSlownie(d.now)} · stan na ${d.now.slice(11, 16)}`,
+    [['zadzwoń dziś', doTelefonuDzis.length, doTelefonuDzis.length ? '#b42318' : '#17803d'], ['nowe', nowe.length], ['otwarte razem', moje.length], ['wczoraj obsłużone', obsl.length, '#17803d']],
+    [
+      sekcja('🔔 Przypomnij dziś – zaległe, zadzwoń do 16:00', '#b42318', naDzis.length, naDzis.map((it) => wierszLeada(it, cfg, osoba.id)).join(''), 'Nic zaległego – świetnie!'),
+      sekcja('🆕 Nowe od wczoraj', '#0e5c88', nowe.length, nowe.map((it) => wierszLeada({ ...it, nowy: false, powod: `termin pierwszego telefonu: ${terminSlownie(it.termin, d.now)}` }, cfg, osoba.id)).join(''), 'Brak nowych leadów.'),
+      sekcja('⏳ Jeszcze nieobsłużone (w terminie)', '#5d6a76', pozostale.length, pozostale.map((it) => wierszLeada({ ...it, powod: `termin: ${terminSlownie(it.termin, d.now)}` }, cfg, osoba.id)).join(''), 'Brak.'),
+      sekcja('✅ Wczoraj obsłużone', '#17803d', obsl.length, obsl.map((o) => wierszObsluzony(o, false)).join(''), 'Wczoraj nie było rozmów zapisanych w systemie.'),
+    ]);
+  const subject = `☀️ Twoje leady na ${dataSlownie(d.now)}: zadzwoń dziś ${doTelefonuDzis.length}, nowe ${nowe.length}, wczoraj obsłużone ${obsl.length}`;
+  const top = kolejnosc.slice(0, 5).map((it, i) => `${i + 1}. ${it.ponowienia ? '⚠️ ' : ''}${it.nowy ? '🆕 ' : ''}*${it.wiersz.firma || it.wiersz.osoba}* · ${zl(it.wiersz.szac_wartosc_pln)}\n   ${it.powod}\n   📞 ${formatPhone(it.wiersz.telefon_norm) || it.wiersz.email} · 🆔 ${it.wiersz.lead_id}`).join('\n');
+  const wa = `☀️ *Dzień dobry, ${imie}!*\nZadzwoń dziś: *${doTelefonuDzis.length}* · nowe: ${nowe.length} · otwarte: ${moje.length} · wczoraj obsłużone: ${obsl.length}` +
+    (kolejnosc.length ? `\n\n🔔 *Do 16:00:*\n${top}${kolejnosc.length > 5 ? `\n…i jeszcze ${kolejnosc.length - 5} – w mailu.` : ''}\n────────\nPo rozmowie odpowiedz: *numer leada + cyfra*, np. „${kolejnosc[0].wiersz.lead_id} 1”` : '\n\nNic na dziś – dobrego dnia! 👍');
+  return {
+    osoba, liczby: { doTelefonuDzis: doTelefonuDzis.length, zalegle: naDzis.length, nowe: nowe.length, otwarte: moje.length, obsluzone: obsl.length },
+    email: wrapTestMode({ to: osoba.email, cc: '', subject, html }, cfg),
+    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(osoba.whatsapp), nazwa: osoba.nazwa, message: wa }, cfg) : null,
+  };
+}
+
+function zestawienieMarka(d, osoby, cfg) {
+  const marek = marekOf(cfg);
+  const pierwsze = d.obsluzone.filter((o) => o.wTerminie !== null);
+  const wTerminie = pierwsze.filter((o) => o.wTerminie).length;
+  const proc = pierwsze.length ? Math.round((wTerminie / pierwsze.length) * 100) + '%' : '—';
+  const eskalacje = d.otwarte.filter((it) => it.poziom >= 3);
+  const poTerminie = d.otwarte.filter((it) => it.poziom === 2);
+  const duze = d.otwarte.filter((it) => Number(it.wiersz.szac_wartosc_pln) > d.prog);
+  const suma = (a) => zl(a.reduce((s, it) => s + (Number(it.wiersz.szac_wartosc_pln) || 0), 0));
+  const tabela = `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;font:13px Arial,sans-serif;color:#142029">
+<tr style="color:#8a96a1;font-size:11px;text-transform:uppercase"><td style="padding:6px 4px">Opiekun</td><td style="padding:6px 4px;text-align:right">Nowe</td><td style="padding:6px 4px;text-align:right">Obsłużone</td><td style="padding:6px 4px;text-align:right">Otwarte</td><td style="padding:6px 4px;text-align:right">Po terminie</td><td style="padding:6px 4px;text-align:right">Eskalacje</td><td style="padding:6px 4px;text-align:right">Wartość otwartych</td></tr>
+${osoby.map((o) => {
+    const ot = d.otwarte.filter((it) => it.opiekun.id === o.id);
+    const nowe = d.nowe.filter((r) => recipientFor(r, [], cfg).id === o.id || r.handlowiec_id === o.id).length;
+    const ob = d.obsluzone.filter((x) => x.opiekun.id === o.id).length;
+    const pt = ot.filter((it) => it.poziom === 2).length, es = ot.filter((it) => it.poziom >= 3).length;
+    const czerw = (n) => (n ? `<b style="color:#b42318">${n}</b>` : '<span style="color:#8a96a1">0</span>');
+    return `<tr style="border-top:1px solid #eef1f4"><td style="padding:7px 4px"><b>${esc(o.nazwa)}</b></td><td style="padding:7px 4px;text-align:right">${nowe}</td><td style="padding:7px 4px;text-align:right">${ob}</td><td style="padding:7px 4px;text-align:right">${ot.length}</td><td style="padding:7px 4px;text-align:right">${czerw(pt)}</td><td style="padding:7px 4px;text-align:right">${czerw(es)}</td><td style="padding:7px 4px;text-align:right">${suma(ot)}</td></tr>`;
+  }).join('')}</table>`;
+  const html = ramkaMaila('📊 Poranne zestawienie zespołu', `${dataSlownie(d.now)} · stan na ${d.now.slice(11, 16)} · „wczoraj” = od ${d.od.slice(8, 10)}.${d.od.slice(5, 7)} 8:00`,
+    [['nowe', d.nowe.length], ['obsłużone', d.obsluzone.length, '#17803d'], ['w terminie doby', proc], ['otwarte', `${d.otwarte.length}`], ['po terminie', poTerminie.length, poTerminie.length ? '#b42318' : ''], ['eskalacje', eskalacje.length, eskalacje.length ? '#7c1515' : '']],
+    [
+      sekcja('👥 Zespół', '#142029', osoby.length, tabela, ''),
+      sekcja('🚨 Eskalacje – bez kontaktu ponad 2 dni robocze', '#7c1515', eskalacje.length, eskalacje.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Brak eskalacji.'),
+      sekcja('⏰ Po terminie doby (wczoraj do 16:00)', '#b42318', poTerminie.length, poTerminie.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Wszystkie leady w terminie.'),
+      sekcja(`💰 Duże leady (powyżej ${zl(d.prog)}) bez kontaktu`, '#4b45a1', duze.length, duze.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Brak otwartych dużych leadów.'),
+      sekcja('✅ Wczoraj obsłużone', '#17803d', d.obsluzone.length, d.obsluzone.map((o) => wierszObsluzony(o, true)).join(''), 'Wczoraj nie było rozmów zapisanych w systemie.'),
+    ]);
+  const subject = `📊 Zespół ${dataSlownie(d.now)}: obsłużone ${d.obsluzone.length}, nowe ${d.nowe.length}, po terminie ${poTerminie.length}, eskalacje ${eskalacje.length}`;
+  const wa = `📊 *Poranne zestawienie – ${dataSlownie(d.now)}*\nWczoraj: nowe ${d.nowe.length} · obsłużone ${d.obsluzone.length} · w terminie doby ${proc}\nOtwarte: ${d.otwarte.length} (${suma(d.otwarte)}) · po terminie ${poTerminie.length} · eskalacje *${eskalacje.length}*` +
+    (eskalacje.length ? `\n\n🚨 *Eskalacje:*\n${eskalacje.slice(0, 5).map((it, i) => `${i + 1}. *${it.wiersz.firma || it.wiersz.osoba}* · ${zl(it.wiersz.szac_wartosc_pln)} · ${it.opiekun.nazwa} · czeka ${fmtCzeka(it.minuty)}`).join('\n')}${eskalacje.length > 5 ? `\n…i jeszcze ${eskalacje.length - 5} – w mailu.` : ''}` : '');
+  return {
+    liczby: { nowe: d.nowe.length, obsluzone: d.obsluzone.length, wTerminie: proc, otwarte: d.otwarte.length, poTerminie: poTerminie.length, eskalacje: eskalacje.length },
+    email: wrapTestMode({ to: marek.email, cc: '', subject, html }, cfg),
+    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(marek.whatsapp), nazwa: marek.nazwa, message: wa }, cfg) : null,
+  };
+}
+
+// Wszystkie zestawienia dnia: handlowcy (i Ania, jeśli ma leady) + Marek
+function zestawieniaPoranne(rows, historia, handlowcyRows, cfg, now) {
+  const d = danePoranne(rows, historia, handlowcyRows, cfg, now);
+  const osoby = handlowcyRows.filter((h) => h.handlowiec_id).map((h) => osobaPoId(h.handlowiec_id, handlowcyRows, cfg));
+  if (d.otwarte.some((it) => it.opiekun.id === 'ANIA') || d.obsluzone.some((o) => o.opiekun.id === 'ANIA')) osoby.push(aniaOf(cfg));
+  const osobiste = osoby.map((o) => zestawienieHandlowca(o, d, cfg))
+    .filter((z) => z.liczby.otwarte || z.liczby.obsluzone); // kto nie ma nic – nie dostaje pustego maila
+  const marek = zestawienieMarka(d, osoby, cfg);
+  const historiaWpisy = [...osobiste.map((z) => z.osoba.nazwa), 'Marek'].map((kto) => ({ czas: now, lead_id: '', zdarzenie: 'raport', kto: 'system', szczegoly: `poranne zestawienie: ${kto}` }));
+  return { osobiste, marek, dane: d, historia: historiaWpisy };
 }
 
 // ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------

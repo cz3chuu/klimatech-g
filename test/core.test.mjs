@@ -310,7 +310,7 @@ test('n8n/dist: "Obsłuż" (obsługa co minutę) – skrzynka, odpowiedź WhatsA
   const wpisy = parseCsv(readFileSync('data/wpisz-lead-szablon.csv', 'utf8')).map((r, i) => ({ ...r, row_number: i + 2 }));
   const odp = { ...msg('1 wysłałem cennik', '🆔 L-005'), idMessage: 'W1' };
   const nodes = {
-    Konfiguracja: [{ ...cfgWa, TERAZ: '2026-10-05 10:00' }], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy,
+    Konfiguracja: [{ ...cfgWa, TERAZ: '2026-10-05 12:30' }], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy,
     'Pobierz wiadomości': [odp, odp], 'Pobierz wysłane': [{ error: 'brak' }], 'Pobierz wyjątki': wyjatki,
   };
   const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
@@ -394,4 +394,25 @@ test('n8n/dist: raport raz dziennie (pamięć daty), poza godzinami pracy brak, 
   assert.ok(!p2 || !p2.historia.some((h) => h.zdarzenie === 'raport')); // drugi raz tego dnia – nie
   assert.equal(uruchom({ ...cfgWa, TERAZ: '2026-10-10 09:00' }, {})?.historia.some((h) => h.zdarzenie === 'raport') || false, false); // sobota
   assert.ok(uruchom({ ...cfgWa, TERAZ: '2026-10-05 08:09', RAPORT_TERAZ: 'true' }, pamiec).historia.some((h) => h.zdarzenie === 'raport'));
+});
+
+// --- poranne zestawienia (punkt 5): osobiste i zbiorcze ---
+test('Zestawienia: sekcje handlowca rozłączne, „wczoraj” z historii, Marek z eskalacjami i tabelą', () => {
+  const NOW5 = '2026-09-25 08:00';
+  const stan = rows.filter((r) => r.data_zgloszenia < NOW5)
+    .map((r) => (r.pierwszy_kontakt && r.pierwszy_kontakt >= NOW5 ? { ...r, status: 'nowy', pierwszy_kontakt: '' } : r));
+  const { historia } = importLeads(leady, handlowcy, NOW, wyjatki);
+  const z = core.zestawieniaPoranne(stan, historia.filter((h) => h.czas < NOW5), handlowcy, cfgWa, NOW5);
+  for (const o of z.osobiste) assert.ok(o.liczby.zalegle + o.liczby.nowe <= o.liczby.otwarte && o.liczby.doTelefonuDzis >= o.liczby.zalegle); // sekcje rozłączne
+  const kasia = z.osobiste.find((o) => o.osoba.id === 'H2');
+  assert.equal(kasia.liczby.obsluzone, 2); // L-010 i L-012 – rozmowy z 24.09
+  assert.match(kasia.email.html, /Wczoraj obsłużone/);
+  assert.match(kasia.email.html, /w terminie/);
+  assert.match(kasia.email.subject, /^\[TEST → k\.lis@klimatech\.example\] ☀️ Twoje leady na piątek, 25 września/);
+  assert.match(z.marek.email.html, /Eskalacje – bez kontaktu ponad 2 dni robocze/);
+  assert.match(z.marek.email.html, /Instal-Tech Kowalczyk/); // L-007 z 22.09 – eskalacja 25.09
+  assert.equal(z.marek.liczby.eskalacje, 4);
+  assert.equal(z.marek.liczby.wTerminie, '100%');
+  assert.ok(z.osobiste.every((o) => !/Termex/.test(o.email.html))); // Termex zgłosi się dopiero 1.10
+  assert.ok(z.historia.some((h) => /poranne zestawienie: Marek/.test(h.szczegoly)));
 });
