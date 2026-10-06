@@ -1,13 +1,12 @@
 # Klimatech – automatyzacja leadów (makieta)
 
-Makieta systemu, który pilnuje, żeby **każde zapytanie od instalatora trafiło do właściwego handlowca i dostało telefon w ciągu doby roboczej**. Powstała jako zadanie rekrutacyjne na podstawie maila od klienta (Marek, właściciel hurtowni pomp ciepła) i eksportu jego arkusza leadów, a potem została rozbudowana o drugą rundę ustaleń z klientem (regiony wspólne, wyjątki, SLA, nieobecności, zestawienia, Contact Form 7, WhatsApp Business API).
+Makieta systemu, który pilnuje, żeby **każde zapytanie od instalatora trafiło do właściwego handlowca i dostało telefon w ciągu doby roboczej**. Powstała jako zadanie rekrutacyjne na podstawie maila od klienta (Marek, właściciel hurtowni pomp ciepła) i eksportu jego arkusza leadów, a potem została rozbudowana o drugą rundę ustaleń z klientem (regiony wspólne, wyjątki, SLA, nieobecności, zestawienia, WhatsApp Business API).
 
 Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy nim bez rozmowy z autorem. Dokumenty obok:
 
 | Dokument | Dla kogo |
 |---|---|
 | [docs/propozycja-dla-klienta.md](docs/propozycja-dla-klienta.md) | klient: rozwiązanie, koszty, czego od niego potrzebujemy |
-| [docs/dla-agencji-cf7.md](docs/dla-agencji-cf7.md) | agencja WWW: jak podpiąć Contact Form 7 |
 | [docs/whatsapp-business-api.md](docs/whatsapp-business-api.md) | klient + zespół: kroki w Meta, 5 szablonów do zgłoszenia, jak przełączyć |
 | [docs/makiety/](docs/makiety/index.html) | klient: poranne zestawienia do akceptacji (`komplet.html` = wszystko w jednym pliku) |
 
@@ -16,7 +15,7 @@ Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy
 ## 1. Problem klienta w pięciu zdaniach
 
 - Sześciu handlowców, każdy ma swoje województwa. Lead ma iść **tylko** do opiekuna regionu (była awantura o prowizje).
-- Zapytania przychodzą z formularza WWW (Contact Form 7), maili i telefonów. Ania z biura przepisuje wszystko do jednego arkusza.
+- Zapytania przychodzą z formularza WWW, maili i telefonów. Ania z biura przepisuje wszystko do jednego arkusza.
 - Leady giną: z eksportu wynika, że kontakt dostało **12 z 37** zapytań (32%), a bez kontaktu czeka **~710 tys. zł**. Dwa województwa (lubuskie, podlaskie) nie miały handlowca wcale.
 - Ta sama firma pisze drugi raz, bo nikt nie oddzwonił. Zdarzyło się, że zadzwoniły dwie osoby i podały różne ceny.
 - Handlowcy **nie czytają maili**, czytają WhatsAppa. Pracują pn–pt 8–16. Marek chce telefonu w ciągu doby roboczej i eskalacji do siebie.
@@ -34,11 +33,10 @@ Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy
 | Lead nie może „przeczekać” | **poranny raport** w dni robocze (działa), a obok **nowe zestawienia o 8:00** (handlowiec + Marek) – makiety czekają na akceptację klienta |
 | Urlop, L4, odejście handlowca | **nieobecności z zastępcą** (lead i przypomnienia idą do zastępcy, w treści „zastępstwo za …”), **odejście** = data `aktywny_do`, po niej handlowiec znika z przydziału |
 | Kto zarządza zespołem | **zakładka Zespół w CRM**: handlowcy, województwa, pokrycie mapy, nieobecności – edycja tylko dla administratora. Zmiany co minutę trafiają do arkusza |
-| Formularz na stronie | **Contact Form 7 → webhook z kluczem dostępu**, tłumaczenie domyślnych pól CF7, strona sprawdzająca adres, instrukcja dla agencji |
 | Maile i telefony wpisywane przez biuro | zakładka arkusza **„Wpisz lead”** – Ania wpisuje wiersz, system odpisuje w wierszu ✅ / ⚠ / ❌ |
 | Szef ma widzieć wszystko | **mini CRM** (Supabase + prosta strona): leady, karta klienta z osią czasu, statystyki handlowców, zespół |
 
-Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontach: formularz n8n zamiast strony WordPress (webhook CF7 jest gotowy), Gmail zamiast poczty klienta, Green API zamiast oficjalnego WhatsApp API (wariant Meta zbudowany i przetestowany przykładowymi zdarzeniami). **Rdzeń logiki działa naprawdę na danych z załącznika.**
+Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontach: formularz n8n zamiast strony WordPress (webhook `/webhook/lead` gotowy na dane ze strony), Gmail zamiast poczty klienta, Green API zamiast oficjalnego WhatsApp API (wariant Meta zbudowany i przetestowany przykładowymi zdarzeniami). **Rdzeń logiki działa naprawdę na danych z załącznika.**
 
 ---
 
@@ -49,13 +47,13 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
                           │ normalizacja · duplikaty · przydział · zespół · SLA · treści · zestawienia │
                           └────────────────────────────────────┬───────────────────────────────────────┘
                                                                │ (ten sam kod wklejony do węzłów Code)
- Contact Form 7 (WWW) ────┐  POST /webhook/lead?klucz=…        │
- Formularz klienta (n8n) ─┴─► [1] Przyjęcie leada ─────────────┤──► Google Sheets: Leady, Historia, Handlowcy,
+ Formularz klienta (n8n) ─┐                                    │
+ Webhook /webhook/lead ───┴─► [1] Przyjęcie leada ─────────────┤──► Google Sheets: Leady, Historia, Handlowcy,
                                                                │     Wyjątki, Nieobecności, Wpisz lead
  Zakładka „Wpisz lead” ───┐                                    │          ▲     │                    ▲
  WhatsApp „1 + notatka” ──┴─► [2] Obsługa co minutę ───────────┘          │     ▼ leady, historia    │ zespół, nieobecności
                                (skrzynka, odpowiedzi, SLA, raport)        │  [4] Synchronizacja z CRM ◄──► Supabase ◄──► mini CRM (crm/)
- Przycisk w mailu ───────────► [3] Status z linku (+ strona adresu CF7) ──┤
+ Przycisk w mailu ───────────► [3] Status z linku ───────────────────────┤
  Przycisk w WhatsApp (Meta) ─► [5] WhatsApp Business – odbiór ────────────┘
                                                                │
                          WhatsApp (Green API albo Meta) + Gmail do handlowca / zastępcy / Marka / Ani
@@ -69,9 +67,9 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 
 | # | Workflow | Wyzwalacz | Zadanie |
 |---|---|---|---|
-| 1 | **Przyjęcie leada** | webhook `POST /webhook/lead` (CF7, z kluczem), formularz `/form/klimatech` | nowe zgłoszenie → rdzeń → arkusz → WhatsApp + mail (+ „duży lead” do Marka) → odpowiedź (JSON albo strona podziękowania) |
+| 1 | **Przyjęcie leada** | webhook `POST /webhook/lead` (docelowo strona WWW), formularz `/form/klimatech` | nowe zgłoszenie → rdzeń → arkusz → WhatsApp + mail (+ „duży lead” do Marka) → odpowiedź (JSON albo strona podziękowania) |
 | 2 | **Obsługa co minutę** | co 1 min (+ test ręczny) | skrzynka „Wpisz lead” → odpowiedzi handlowców z WhatsAppa (Green API) → SLA (co 15 min) → poranny raport (dni robocze, od 8:00) |
-| 3 | **Status z linku w mailu** | `GET /webhook/status?lead=…&t=…&s=…`, `GET /webhook/lead?klucz=…` | klik w przycisk statusu w mailu; osobno strona „✅ Adres formularza działa” do sprawdzenia adresu CF7 w przeglądarce |
+| 3 | **Status z linku w mailu** | `GET /webhook/status?lead=…&t=…&s=…` | klik w przycisk statusu w mailu (Marek, Ania przy komputerze) |
 | 4 | **Synchronizacja z CRM** | co 1 min | arkusz → Supabase (leady, historia) oraz Supabase → arkusz (zespół, nieobecności). Osobno, żeby awaria CRM nie zatrzymała leadów |
 | 5 | **WhatsApp Business (Meta) – odbiór** | `GET/POST /webhook/whatsapp` | weryfikacja webhooka Meta i kliknięcia przycisków w szablonie → status, notatka, potwierdzenie. Potrzebny dopiero po przełączeniu na Meta |
 
@@ -79,8 +77,8 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 
 ## 4. Jak to działa krok po kroku (życie jednego leada)
 
-1. **Zgłoszenie.** Klient wypełnia formularz na stronie (CF7 wysyła JSON na webhook z kluczem) albo formularz n8n, albo Ania wpisuje wiersz w „Wpisz lead”.
-2. **Klucz i ujednolicenie.** Webhook bez poprawnego klucza (`?klucz=` albo nagłówek `X-Klimatech-Token`) jest odrzucany. Pola CF7 (`your-name`, `your-tel`, `your-region`…), etykiety formularza albo JSON zamieniają się na jeden kształt danych (`firma, osoba, telefon, email, miasto, wojewodztwo, …`).
+1. **Zgłoszenie.** Klient wypełnia formularz (albo strona wysyła JSON na webhook, albo Ania wpisuje wiersz w „Wpisz lead”.
+2. **Ujednolicenie.** Etykiety formularza albo JSON zamieniają się na jeden kształt danych (`firma, osoba, telefon, email, miasto, wojewodztwo, …`).
 3. **Walidacja.** Wymagana firma lub osoba oraz poprawny telefon (9 cyfr, dowolny format) lub e-mail. Błąd → klient widzi „Sprawdź dane w formularzu”, nic nie jest zapisywane.
 4. **Powtórka?** Ten sam telefon z tego samego źródła w ciągu 30 min = podwójne kliknięcie. Nie zapisujemy drugi raz.
 5. **Duplikat?** Ten sam telefon / e-mail → *pewny* (lead zostaje u opiekuna oryginału), ta sama nazwa firmy / domena → *możliwy* (do potwierdzenia przez biuro, kopia do Ani).
@@ -117,8 +115,6 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 | Lider sprzedaży | lead > `PROG_LIDER` (domyślnie 50 000 zł) → dodatkowe powiadomienie dla Marka | `processInquiry` |
 | Nieobecność | `od_dnia`–`do_dnia` włącznie, `zastepca_id`, `anulowana`; powiadomienia, przypomnienia i zestawienia idą do zastępcy, lead zostaje u opiekuna | `nieobecnoscDla`, `zastepcaDla`, `recipientFor` |
 | Odejście | `aktywny_do` (data) – po niej handlowiec nie dostaje nowych leadów; region wspólny przechodzi na drugą osobę, pozostałe → Ania | `aktywny`, `parseHandlowcy` |
-| Klucz formularza | `WEBHOOK_KLUCZ` z konfiguracji; puste = bez kontroli (tylko lokalnie) | `kluczPoprawny` |
-| Pola CF7 | `your-name`, `your-tel`, `your-email`, `your-company`, `your-city`, `your-region`, `zainteresowanie`, `kim-jestes`, `wartosc`, `your-message`, `acceptance-rodo`; pola `_wpcf7…` pomijane | `CF7_POLA`, `zFormularzaStrony` |
 | Powtórne wysłanie | ten sam telefon, to samo źródło, ≤ 30 min | `powtorneWyslanie` |
 | Województwo z miasta | krótka lista miast (docelowo kod pocztowy / TERYT) | `MIASTA` |
 | Odpowiedź WhatsApp | cyfra 1–4, słowa („dodzwoniłem”, „nie odebrał”…), przycisk Meta (payload `L-041\|status`); lead z cytatu `🆔` lub `L-041 1` | `parseWaReply`, `przyciskNaTekst`, `zMeta` |
@@ -137,7 +133,7 @@ n8n/src/core.js                 rdzeń logiki – JEDYNE miejsce, gdzie zmienia 
 n8n/src/1-…5-*.glue.js          kod konkretnych węzłów Code (krótki, woła funkcje rdzenia)
 n8n/dist/*.js                   rdzeń + glue sklejone do wklejenia w n8n (generowane)
 n8n/workflows/*.json            gotowe workflow do importu (generowane, wartości przykładowe)
-n8n/config.example.json         wzór konfiguracji lokalnej (ID arkusza, poświadczenia, numery, klucze)
+n8n/config.example.json         wzór konfiguracji lokalnej (ID arkusza, poświadczenia, numery, tokeny)
 scripts/build-n8n.mjs           src -> dist
 scripts/build-workflows.mjs     dist + konfiguracja -> workflow JSON (cała definicja węzłów i połączeń)
 scripts/import-csv.mjs          eksport arkusza Ani -> pliki do importu (z --raport także docs/raport.md)
@@ -152,8 +148,8 @@ data/wyjatki.csv                reguły wyjątków (Termex -> Ania) – do zakł
 data/nieobecnosci-szablon.csv   nagłówki zakładki Nieobecności
 data/leady-import.csv …         wynik importu do zakładek Leady / Historia
 data/wpisz-lead-szablon.csv     zakładka „Wpisz lead” z 3 przykładowymi wierszami
-test/core.test.mjs              48 testów (node:test, bez zależności)
-docs/                           propozycja, instrukcja CF7, WhatsApp Business API, makiety zestawień
+test/core.test.mjs              46 testów (node:test, bez zależności)
+docs/                           propozycja, WhatsApp Business API, makiety zestawień
 ```
 
 **Zasada:** kodu w węzłach n8n nie edytuje się ręcznie. Zmieniasz `n8n/src/`, uruchamiasz `npm test` i `npm run build:workflows`, importujesz workflow ponownie. Dzięki temu ta sama logika jest testowana, używana przez import danych, makiety i n8n.
@@ -165,7 +161,7 @@ docs/                           propozycja, instrukcja CF7, WhatsApp Business AP
 Wymagania: Node.js 20+, n8n (testowane na 1.116 w Dockerze, strefa `Europe/Warsaw`), konto Google. Opcjonalnie: Green API (WhatsApp – makieta), Supabase (CRM i zespół), Meta (WhatsApp – produkcja). Zależności npm: brak.
 
 ```bash
-npm test                    # 48 testów rdzenia na danych z załącznika
+npm test                    # 46 testów rdzenia na danych z załącznika
 npm run import              # (opcjonalnie) przeliczenie historii według aktualnych reguł -> data/*-import.csv
 ```
 
@@ -198,7 +194,6 @@ Najważniejsze pola `config.local.json` (pełna lista w `config.example.json`):
 |---|---|
 | `TRYB_TESTOWY`, `TEST_INBOX`, `TEST_WHATSAPP` | `true` = wszystkie wiadomości idą na skrzynkę i numer testowy |
 | `PROG_LIDER` | próg „dużego leada” dla Marka (domyślnie 50000) |
-| `WEBHOOK_KLUCZ` | klucz dostępu do adresu formularza CF7 – długi losowy ciąg, przekazywany agencji osobno |
 | `WHATSAPP` | `green` (makieta) albo `meta` (WhatsApp Business API) |
 | `META_PHONE_ID`, `META_TOKEN`, `META_VERIFY_TOKEN`, `META_API_WERSJA` | dane z Meta (patrz [docs/whatsapp-business-api.md](docs/whatsapp-business-api.md)) |
 | `GREEN_API_URL`, `GREEN_ID`, `GREEN_TOKEN`, `GREEN_PHONE` | Green API (makieta) |
@@ -221,9 +216,6 @@ Po imporcie z CLI workflow są **nieaktywne** – aktywuj w UI albo `n8n update:
 4. W `config.local.json`: `SUPABASE_URL`, `SUPABASE_PUBLIC_KEY`.
 5. `npm run crm` → http://localhost:5180. Podgląd bez Supabase na danych z eksportu: http://localhost:5180/?demo
 
-### 7.6 Contact Form 7 (produkcja)
-n8n musi być dostępny z internetu po HTTPS. Agencja instaluje wtyczkę **CF7 to Webhook** i wkleja `https://<n8n>/webhook/lead?klucz=<WEBHOOK_KLUCZ>`. Ten sam adres otwarty w przeglądarce pokazuje „✅ Adres formularza działa” (bez klucza – 403). Instrukcja dla agencji: [docs/dla-agencji-cf7.md](docs/dla-agencji-cf7.md).
-
 ---
 
 ## 8. Jak przetestować
@@ -240,8 +232,7 @@ n8n musi być dostępny z internetu po HTTPS. Agencja instaluje wtyczkę **CF7 t
 | Duży lead | wartość 60 000 zł | zwykłe powiadomienie do handlowca + „💰 Duży lead” do Marka |
 | Nieobecność | CRM → Zespół → nieobecność Tomasza obejmująca dziś, zastępca Kasia; lead z mazowieckiego | po synchronizacji (≤ 1 min): powiadomienie do Kasi „zastępstwo za Tomasz Wrona”, w arkuszu `zastepstwo_za = H1` |
 | Odejście | CRM → Zespół → Edytuj Michała → `aktywny_do` w przeszłości; lead z lubuskiego | zawsze Bartosz |
-| CF7 – adres | `GET /webhook/lead?klucz=<klucz>` w przeglądarce / bez klucza | „✅ Adres formularza działa” (200) / „Brak dostępu” (403) |
-| CF7 – zgłoszenie | `POST /webhook/lead?klucz=<klucz>` z JSON jak w [docs/dla-agencji-cf7.md](docs/dla-agencji-cf7.md) | `{ ok: true, lead_id, przypisano, … }`; bez klucza albo ze złym – `{ ok: false }`, nic nie zapisane |
+| Webhook strony | `POST /webhook/lead` z JSON (pola jak w arkuszu) | JSON `{ ok, lead_id, routing, przypisano, duplikat, sla_start }` |
 | Wpis biura | wiersz w „Wpisz lead” | po ≤ 1 min kolumna `wynik`: `✅ L-0xx → …` / `⚠ ponowienie` / `❌ popraw` |
 | Kontakt z WhatsAppa | odpowiedz na wiadomość z leadem: `1 wysłałem cennik` | po ≤ 1 min „✅ Zapisano…📝”, status, `pierwszy_kontakt`, notatka |
 | Meta – weryfikacja | `GET /webhook/whatsapp?hub.mode=subscribe&hub.verify_token=<token>&hub.challenge=123` | `123` (200); zły token → 403 |
@@ -262,9 +253,8 @@ Przed demo: ponownie zaimportuj CSV do zakładek *Leady* i *Historia* (czyści t
 - **Zastępca dostaje powiadomienia, lead zostaje u opiekuna.** Prowizje i historia klienta się nie mieszają, a po powrocie nic nie trzeba przepisywać.
 - **Handlowcy pracują tylko w WhatsAppie.** Jedna cyfra albo jeden przycisk – warunek Marka „nic, co ich spowolni”.
 - **Mail zamiast WhatsAppa dla Marka i Ani** (kopia), bo siedzą przy komputerze; przyciski statusu w mailu działają przez workflow 3.
-- **Jeden rdzeń, wiele wejść.** CF7, formularz, wpis biura, Green API i Meta przechodzą przez te same funkcje – logika testowana bez n8n.
+- **Jeden rdzeń, wiele wejść.** Webhook, formularz, wpis biura, Green API i Meta przechodzą przez te same funkcje – logika testowana bez n8n.
 - **Doba i eskalacja bez osobnych maili.** Jedno poranne zestawienie zamiast lawiny pojedynczych alarmów; osobno tylko przypomnienie po 4 h.
-- **Klucz w adresie formularza, nie tylko w nagłówku.** Nie każda wtyczka CF7 umie ustawić nagłówek, a adres z kluczem da się sprawdzić w przeglądarce.
 - **Import historii ustawia `sla_poziom` na stan z dnia importu**, żeby pierwszy przebieg nie wysłał kilkunastu przypomnień naraz. Zaległości zbiera poranny raport.
 
 ## 10. Znane ograniczenia makiety (świadome)
@@ -273,8 +263,8 @@ Przed demo: ponownie zaimportuj CSV do zakładek *Leady* i *Historia* (czyści t
 |---|---|
 | Arkusz jako baza leadów: brak transakcji, dwa zgłoszenia w tej samej sekundzie mogą dostać ten sam `lead_id` | Supabase jako źródło prawdy (sekwencja, unikalny indeks na `telefon_norm`) |
 | Green API – nieoficjalne (ryzyko blokady numeru) | WhatsApp Business API – zbudowane, czeka na numer i weryfikację klienta |
-| n8n lokalnie – CF7 i Meta nie mają jak się połączyć z internetu | serwer z HTTPS (VPS albo n8n Cloud) |
-| Klucz formularza stały, w adresie | zmiana klucza przy zmianie agencji; ewentualnie podpis HMAC, jeśli wtyczka go obsługuje |
+| n8n lokalnie – strona WWW i Meta nie mają jak się połączyć z internetu | serwer z HTTPS (VPS albo n8n Cloud) |
+| Webhook bez uwierzytelnienia | sekret ustawiony we wtyczce formularza WordPress (sposób podpięcia formularza do ustalenia z klientem i agencją) |
 | Token w linkach statusu z `Math.random()` | podpis HMAC |
 | Odejście handlowca nie przepisuje jego otwartych leadów | przy `aktywny_do` – lista otwartych leadów do przepisania dla Marka |
 | Paski SLA w CRM pokazują stare progi | przeliczenie według `terminDoby` / `terminEskalacji` |
@@ -287,7 +277,7 @@ Przed demo: ponownie zaimportuj CSV do zakładek *Leady* i *Historia* (czyści t
 
 Kolejność wg wartości dla klienta (szczegóły i koszty w [propozycji](docs/propozycja-dla-klienta.md)):
 
-1. **Wdrożenie produkcyjne:** n8n na serwerze z HTTPS, agencja podpina CF7 (adres + klucz), prawdziwe numery handlowców w CRM, `TRYB_TESTOWY = false`.
+1. **Wdrożenie produkcyjne:** n8n na serwerze z HTTPS, podpięcie formularza WordPress (sposób do ustalenia z agencją), prawdziwe numery handlowców w CRM, `TRYB_TESTOWY = false`.
 2. **WhatsApp Business API:** klient rejestruje numer i szablony, my przełączamy `WHATSAPP = meta`.
 3. **Zestawienia 8:00** po akceptacji makiet – podłączenie w workflow 2.
 4. **Odejście Michała (30.11):** `aktywny_do` w CRM, przepisanie jego otwartych leadów, decyzja o lubuskim.
