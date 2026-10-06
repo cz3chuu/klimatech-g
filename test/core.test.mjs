@@ -90,8 +90,23 @@ test('godziny robocze: weekend się nie liczy, 11.11 to święto', () => {
   assert.equal(core.businessMinutes('2026-11-10 15:00', '2026-11-12 09:00'), 120);
   assert.ok(core.holidays(2026).has('2026-06-04')); // Boże Ciało
 });
-test('progi SLA: 4 h, 1 dzień, 2 dni robocze', () => {
-  assert.deepEqual([239, 240, 480, 959, 960].map(core.slaLevel), [0, 1, 2, 2, 3]);
+test('progi SLA: 4 h, doba robocza = do 16:00 następnego dnia roboczego, eskalacja = do 16:00 drugiego', () => {
+  const pon = '2026-10-05 09:00';
+  assert.deepEqual(['2026-10-05 12:59', '2026-10-05 13:00', '2026-10-06 15:59', '2026-10-06 16:00', '2026-10-07 16:00'].map((n) => core.slaLevelAt(pon, n)), [0, 1, 1, 2, 3]);
+  assert.equal(core.terminDoby('2026-10-05 15:59'), '2026-10-06 16:00'); // zgłoszenie tuż przed końcem dnia – też do jutra 16:00
+  assert.equal(core.terminDoby('2026-10-02 17:00'), '2026-10-05 16:00'); // piątek po godzinach -> poniedziałek
+  assert.equal(core.terminDoby('2026-10-03 11:00'), '2026-10-05 16:00'); // sobota -> poniedziałek
+  assert.equal(core.terminEskalacji('2026-10-30 12:00'), '2026-11-03 16:00'); // przez weekend i 1 listopada
+});
+test('po terminie doby i eskalacja – bez osobnej wiadomości (poranne zestawienia), wiadomość tylko po 4 h', () => {
+  const lead = { lead_id: 'L-900', data_zgloszenia: '2026-10-05 09:00', status: 'nowy', routing: 'handlowiec', handlowiec_id: 'H5', handlowiec: 'Ewa Sowa', sla_poziom: 2, firma: 'Eskalowany' };
+  const out = core.processCycle({ rows: [lead], handlowcy, cfg: cfgWa, now: '2026-10-08 08:00', sla: true });
+  const po4h = core.processCycle({ rows: [{ ...lead, lead_id: 'L-901', sla_poziom: 0 }], handlowcy, cfg: cfgWa, now: '2026-10-05 13:00', sla: true });
+  assert.equal(po4h.whatsapp.length, 1); // przypomnienie po 4 h – jedyna osobna wiadomość
+  assert.equal(out.aktualizacje[0].sla_poziom, 3);
+  assert.match(out.historia[0].szczegoly, /w porannym zestawieniu Marka/);
+  assert.equal(out.emaile.length, 0);
+  assert.equal(out.whatsapp.length, 0);
 });
 
 // --- workflow A: nowe zapytanie ---
@@ -138,10 +153,12 @@ test('C: po imporcie brak zaległych powiadomień, następnego dnia eskalacje', 
   assert.equal(core.checkSla(rows, handlowcy, cfg, '2026-10-05 08:00').length, 0);
   const jutro = core.checkSla(rows, handlowcy, cfg, '2026-10-06 15:00');
   assert.ok(jutro.length > 0);
+  assert.ok(jutro.some((x) => x.cicho)); // eskalacje oznaczone jako „bez wiadomości”
   assert.ok(jutro.every((x) => !['L-016', 'L-023', 'L-038'].includes(x.lead_id))); // duplikaty liczone na oryginale
   assert.equal(core.checkSla(rows, handlowcy, cfg, '2026-10-10 12:00').length, 0); // sobota – cisza
   const maile = core.groupSlaEmails(jutro, cfg);
-  assert.ok(maile.length < jutro.length); // grupowanie po odbiorcy
+  assert.equal(maile.length, new Set(jutro.filter((x) => !x.cicho).map((x) => x.do.id)).size); // jeden mail na odbiorcę
+  assert.ok(maile.every((m) => !/ESKALACJA/.test(m.subject)));
 });
 
 // --- kod wklejany do n8n działa z obiektem $ jak w węźle Code ---

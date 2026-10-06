@@ -46,8 +46,13 @@ const STATUSY_ZAMYKAJACE_SLA = ['dodzwoniono', 'umowione', 'niezainteresowany'];
 const STATUS_ETYKIETY = { nowy: 'Nowy', nie_odebral: 'Nie odebrał', dodzwoniono: 'Dodzwoniono się', umowione: 'Umówione spotkanie', niezainteresowany: 'Niezainteresowany' };
 
 const GODZ_OD = 8, GODZ_DO = 16;
-// Progi SLA w minutach roboczych: 4 h -> przypomnienie, 1 dzień -> "po SLA", 2 dni -> eskalacja do Marka
-const SLA_PROGI = [240, 480, 960];
+// Progi SLA (ustalone z klientem):
+//  1 – przypomnienie po 4 h roboczych,
+//  2 – „doba robocza”: termin do 16:00 NASTĘPNEGO dnia roboczego po dniu zgłoszenia,
+//  3 – eskalacja: termin do 16:00 DRUGIEGO dnia roboczego po dniu zgłoszenia.
+// Osobna wiadomość tylko przy progu 1. Termin doby i eskalacja trafiają do porannych zestawień (8:00):
+// „termin dziś” – rano, zanim minie; „po terminie” i eskalacje – handlowiec i Marek.
+const SLA_PROGI = [240];
 
 // ---------------- Czas ----------------
 
@@ -122,8 +127,23 @@ function slaStart(createdStr) {
   while (!isBusinessDay(day)) day.setUTCDate(day.getUTCDate() + 1);
   return formatLocal(new Date(day.getTime() + GODZ_OD * 36e5));
 }
-function slaLevel(minutes) {
-  return SLA_PROGI.filter((p) => minutes >= p).length; // 0..3
+// n-ty dzień roboczy po dniu daty (data „YYYY-MM-DD…”) -> „YYYY-MM-DD”
+function dzienRoboczyPo(dataStr, n) {
+  const d = parseLocal(String(dataStr).slice(0, 10) + ' 00:00');
+  if (!d) return '';
+  for (let k = 0; k < n;) { d.setUTCDate(d.getUTCDate() + 1); if (isBusinessDay(d)) k++; }
+  return d.toISOString().slice(0, 10);
+}
+const koniecDnia = (dzien) => (dzien ? `${dzien} ${String(GODZ_DO).padStart(2, '0')}:00` : '');
+function terminDoby(createdStr) { return parseLocal(createdStr) ? koniecDnia(dzienRoboczyPo(createdStr, 1)) : ''; }
+function terminEskalacji(createdStr) { return parseLocal(createdStr) ? koniecDnia(dzienRoboczyPo(createdStr, 2)) : ''; }
+// Poziom SLA leada bez kontaktu w chwili now: 0 brak, 1 > 4 h, 2 po terminie doby, 3 eskalacja
+function slaLevelAt(createdStr, now) {
+  if (!parseLocal(createdStr) || !parseLocal(now)) return 0;
+  const n = String(now).slice(0, 16);
+  if (n >= terminEskalacji(createdStr)) return 3;
+  if (n >= terminDoby(createdStr)) return 2;
+  return businessMinutes(createdStr, n) >= SLA_PROGI[0] ? 1 : 0;
 }
 function fmtGodziny(min) {
   const h = Math.floor(min / 60), m = min % 60;
@@ -756,14 +776,14 @@ function checkSla(rows, handlowcyRows, cfg, now) {
     if (STATUSY_ZAMYKAJACE_SLA.includes(r.status)) continue;
     if (r.duplikat_typ === 'pewny') continue; // SLA liczone na leadzie pierwotnym
     const min = businessMinutes(r.data_zgloszenia, now);
-    const level = slaLevel(min);
+    const level = slaLevelAt(r.data_zgloszenia, now);
     if (level <= (Number(r.sla_poziom) || 0)) continue;
     const owner = recipientFor(r, handlowcyRows, cfg);
-    const marek = marekOf(cfg);
     out.push({
       lead_id: r.lead_id, poziom: level, minuty: min,
-      do: level >= 3 ? marek : owner,
+      do: owner,
       opiekun: owner,
+      cicho: level >= 2, // doba i eskalacja: bez osobnej wiadomości – w porannych zestawieniach
       wiersz: r,
     });
   }
@@ -772,10 +792,9 @@ function checkSla(rows, handlowcyRows, cfg, now) {
 
 const SLA_OPIS = {
   1: { tytul: 'Przypomnienie: leady czekają ponad 4 h robocze', kolor: '#b45309' },
-  2: { tytul: 'PO SLA: leady bez kontaktu ponad 1 dzień roboczy', kolor: '#b91c1c' },
-  3: { tytul: 'ESKALACJA: leady bez kontaktu ponad 2 dni robocze', kolor: '#7f1d1d' },
 };
 function groupSlaEmails(items, cfg) {
+  items = items.filter((it) => !it.cicho && SLA_OPIS[it.poziom]); // eskalacje idą do porannego zestawienia, nie mailem
   const groups = {};
   items.forEach((it) => {
     const key = `${it.do.email}|${it.poziom}`;
@@ -799,6 +818,7 @@ Tel. <a href="tel:${esc(r.telefon_norm)}">${esc(formatPhone(r.telefon_norm) || r
 // Jedna wiadomość WhatsApp na odbiorcę (wszystkie poziomy razem) – krótka, do czytania w trasie
 function groupSlaWhatsapp(items, cfg) {
   if (!kanalWa(cfg)) return [];
+  items = items.filter((it) => !it.cicho);
   const groups = {};
   items.forEach((it) => { (groups[it.do.id] = groups[it.do.id] || { do: it.do, items: [] }).items.push(it); });
   const ikona = { 1: '⏰', 2: '🔴', 3: '🚨' };
@@ -850,7 +870,7 @@ function morningReport(rows, handlowcyRows, cfg, now) {
     const opiekun = recipientFor(it.wiersz, handlowcyRows, cfg);
     dodaj(opiekun, { ...it, opiekun });
     // Marek widzi wszystko po SLA (> 1 dzień roboczy), także leady handlowców
-    if (opiekun.id !== marek.id && it.minuty >= SLA_PROGI[1]) dodaj(marek, { ...it, opiekun });
+    if (opiekun.id !== marek.id && slaLevelAt(it.wiersz.data_zgloszenia, now) >= 2) dodaj(marek, { ...it, opiekun });
   });
   const suma = (items) => zl(items.reduce((s, it) => s + (Number(it.wiersz.szac_wartosc_pln) || 0), 0));
   const emaile = [], whatsapp = [];
@@ -859,7 +879,7 @@ function morningReport(rows, handlowcyRows, cfg, now) {
     const tytul = czyMarek ? `Poranny raport: ${leadyOdm(g.items.length)} po SLA lub bez handlowca (${suma(g.items)})`
       : `Poranny raport: ${leadyOdm(g.items.length, 'otwart')} do telefonu (${suma(g.items)})`;
     const wiersze = g.items.map((it, i) => {
-      const r = it.wiersz, p = slaLevel(it.minuty);
+      const r = it.wiersz, p = slaLevelAt(r.data_zgloszenia, now);
       const kolor = ['#15803d', '#b45309', '#b91c1c', '#7f1d1d'][p];
       return `<tr style="border-top:1px solid #e1e6eb">
 <td style="padding:8px 6px;color:#888">${i + 1}.</td>
@@ -898,7 +918,7 @@ ${r.notatka ? `<br><span style="color:#555;font-size:13px">📝 ${esc(r.notatka)
 // ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------
 // Jeden przebieg, jeden stan: skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
 // Kolejne kroki widzą zmiany poprzednich (np. lead ze skrzynki potwierdzony w tej samej minucie).
-const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po SLA (1 dzień)', 3: 'eskalacja do Marka (2 dni)' };
+const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po terminie doby roboczej – w porannym zestawieniu', 3: 'eskalacja (2 dni robocze) – w porannym zestawieniu Marka' };
 function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false, raport = false }) {
   const out = { nowe_leady: [], aktualizacje: [], historia: [], emaile: [], whatsapp: [], wyniki: [] };
   const mail = String(cfg.KANAL || 'mail') !== 'whatsapp';
@@ -930,10 +950,11 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
     items.forEach((it) => {
       zmien(it.lead_id, { sla_poziom: it.poziom, aktualizacja: now });
       out.historia.push({ czas: now, lead_id: it.lead_id, zdarzenie: 'sla', kto: 'system',
-        szczegoly: `${SLA_HISTORIA[it.poziom]}; czeka ${it.minuty} min roboczych; powiadomienie do ${it.do.nazwa}` });
+        szczegoly: `${SLA_HISTORIA[it.poziom]}; czeka ${it.minuty} min roboczych${it.cicho ? '' : `; powiadomienie do ${it.do.nazwa}`}` });
     });
-    if (mail) out.emaile.push(...groupSlaEmails(items, cfg));
-    out.whatsapp.push(...groupSlaWhatsapp(items, cfg));
+    const doWyslania = items.filter((it) => !it.cicho);
+    if (mail) out.emaile.push(...groupSlaEmails(doWyslania, cfg));
+    out.whatsapp.push(...groupSlaWhatsapp(doWyslania, cfg));
   }
 
   // 4. Poranny raport (raz dziennie): lista otwartych leadów, aż ktoś je zamknie – na stanie po krokach 1–3

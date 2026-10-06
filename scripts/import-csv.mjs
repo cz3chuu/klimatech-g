@@ -56,7 +56,7 @@ export function importLeads(leadyRaw, handlowcy, now, wyjatki = []) {
       row.proby = 1;
     }
     // Poziom SLA na moment importu – żeby pierwszy przebieg workflow C nie wysłał zaległych przypomnień hurtem
-    if (row.status === 'nowy' && row.duplikat_typ !== 'pewny') row.sla_poziom = core.slaLevel(core.businessMinutes(row.data_zgloszenia, now));
+    if (row.status === 'nowy' && row.duplikat_typ !== 'pewny') row.sla_poziom = core.slaLevelAt(row.data_zgloszenia, now);
     row.aktualizacja = now;
     out.push(row);
     historia.push({ czas: row.data_zgloszenia, lead_id: row.lead_id, zdarzenie: 'import', kto: 'Ania (biuro)', szczegoly: `z arkusza biura; ${row.routing}: ${row.handlowiec || '—'}${wyjatek ? ` (wyjątek: ${wyjatek.opis || wyjatek.wartosc})` : ''}${podzial ? ' (region wspólny)' : ''}${dup ? `; ${dup.typ} duplikat ${dup.original.lead_id} (${dup.powod})` : ''}` });
