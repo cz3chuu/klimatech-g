@@ -118,6 +118,15 @@ function build(c) {
     { method: 'GET', url: greenUrl(metoda, '?minutes=10'), options: {} },
     { executeOnce: true, alwaysOutputData: true, onError: 'continueRegularOutput' }); // Green API niedostępne = brak wiadomości, reszta działa
   const ifOnce = (name, pos, expr) => ifTrue(name, pos, expr, { executeOnce: true });
+  const supaGet = (name, pos, sciezka) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
+    method: 'GET', url: `={{ ${K('SUPABASE_URL')} }}/rest/v1/${sciezka}`,
+    authentication: 'genericCredentialType', genericAuthType: 'httpCustomAuth', options: {},
+  }, { credentials: supaCred, executeOnce: true, alwaysOutputData: true, onError: 'continueRegularOutput' });
+  const upsertSheet = (name, pos, tab, klucz) => node(name, 'n8n-nodes-base.googleSheets', 4.7, pos, {
+    authentication: 'oAuth2', resource: 'sheet', operation: 'appendOrUpdate', documentId: doc, sheetName: sheet(tab),
+    columns: { mappingMode: 'autoMapInputData', value: {}, matchingColumns: [klucz], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
+    options: { cellFormat: 'RAW' },
+  }, { credentials: sheetsCred });
   const to = (name) => ({ node: name, type: 'main', index: 0 });
   const chain = (...names) => Object.fromEntries(names.slice(0, -1).map((a, i) => [a, { main: [[to(names[i + 1])]] }]));
   const wf = (id, name, nodes, connections) => ({
@@ -166,6 +175,7 @@ function build(c) {
     getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(4), 0], 'Leady'),
     getRows('Pobierz wyjątki', [X(4), 160], 'Wyjątki', { onError: 'continueRegularOutput' }),
+    getRows('Pobierz nieobecności', [X(4), 320], 'Nieobecności', { onError: 'continueRegularOutput' }),
     code('Przetwórz lead', [X(5), 0], dist('1-przyjecie-leada.js')),
     ifTrue('Nowy i poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
     code('Wiersz do zapisu', [X(7), -120], `return [{ json: ${PL}.row }];`),
@@ -189,7 +199,7 @@ function build(c) {
   ], {
     'Webhook strony WWW': { main: [[to('Zgłoszenie')]] },
     'Formularz klienta': { main: [[to('Zgłoszenie')]] },
-    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz wyjątki', 'Przetwórz lead', 'Nowy i poprawny?'),
+    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz wyjątki', 'Pobierz nieobecności', 'Przetwórz lead', 'Nowy i poprawny?'),
     // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, od razu odpowiedź
     'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Z formularza?')]] },
     ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
@@ -215,6 +225,7 @@ function build(c) {
     getRows('Pobierz leady', [X(3), 0], 'Leady'),
     getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead', { onError: 'continueRegularOutput' }), // brak zakładki nie zatrzymuje SLA
     getRows('Pobierz wyjątki', [X(4), 160], 'Wyjątki', { onError: 'continueRegularOutput' }),
+    getRows('Pobierz nieobecności', [X(4), 320], 'Nieobecności', { onError: 'continueRegularOutput' }),
     waGet('Pobierz wiadomości', [X(5), 0], 'lastIncomingMessages'),
     waGet('Pobierz wysłane', [X(6), 0], 'lastOutgoingMessages'),
     code('Obsłuż', [X(7), 0], dist('2-obsluga-co-minute.js')),
@@ -228,7 +239,7 @@ function build(c) {
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wyjątki', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wyjątki', 'Pobierz nieobecności', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
     'Obsłuż': { main: [[to('Nowe leady'), to('Zmiany leadów'), to('Wpisy historii'), to('Wyniki skrzynki'), to('Maile'), to('WhatsAppy')]] },
     'Nowe leady': { main: [[to('Zapisz nowe leady')]] },
     'Zmiany leadów': { main: [[to('Aktualizuj leady')]] },
@@ -263,12 +274,18 @@ function build(c) {
   });
 
   // ======================================================================
-  // 4. SYNCHRONIZACJA Z CRM – arkusz -> Supabase (lustro), osobno od leadów
+  // 4. SYNCHRONIZACJA Z CRM – zespół: CRM -> arkusz; leady i historia: arkusz -> Supabase (lustro); osobno od leadów
   // ======================================================================
   const W4 = wf('KlimatechWfE0001', 'Klimatech 4 – Synchronizacja z CRM', [
     ...trigger1min(),
     konfiguracja([X(1), 0]),
-    getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
+    // Zespół: CRM (Supabase) -> arkusz. Błąd odczytu z CRM = nic nie zapisujemy (arkusz zostaje na ostatnim stanie).
+    supaGet('Pobierz zespół z CRM', [X(2), -300], 'handlowcy?select=handlowiec_id,imie_nazwisko,email,wojewodztwa,whatsapp,aktywny_do&order=handlowiec_id'),
+    supaGet('Pobierz nieobecności z CRM', [X(3), -300], 'nieobecnosci?select=id,handlowiec_id,od_dnia,do_dnia,zastepca_id,powod,anulowana&order=od_dnia'),
+    code('Handlowcy do arkusza', [X(4), -380], "return $('Pobierz zespół z CRM').all().map((i) => i.json).filter((h) => h.handlowiec_id)\n  .map((h) => ({ json: { handlowiec_id: h.handlowiec_id, imie_nazwisko: h.imie_nazwisko || '', email: h.email || '', wojewodztwa: h.wojewodztwa || '', whatsapp: h.whatsapp || '', aktywny_do: h.aktywny_do || '' } }));"),
+    upsertSheet('Zapisz handlowców', [X(5), -380], 'Handlowcy', 'handlowiec_id'),
+    code('Nieobecności do arkusza', [X(4), -220], "return $('Pobierz nieobecności z CRM').all().map((i) => i.json).filter((n) => n.id)\n  .map((n) => ({ json: { id: n.id, handlowiec_id: n.handlowiec_id, od_dnia: n.od_dnia || '', do_dnia: n.do_dnia || '', zastepca_id: n.zastepca_id || '', powod: n.powod || '', anulowana: n.anulowana ? 'true' : 'false' } }));"),
+    upsertSheet('Zapisz nieobecności', [X(5), -220], 'Nieobecności', 'id'),
     getRows('Pobierz leady', [X(3), 0], 'Leady'),
     getRows('Pobierz historię', [X(4), 0], 'Historia'),
     code('Przygotuj dane', [X(5), 0], dist('4-synchronizacja-crm.js')),
@@ -297,7 +314,12 @@ return out;`, { executeOnce: true }),
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
+    'Konfiguracja': { main: [[to('Pobierz zespół z CRM'), to('Pobierz leady')]] },
+    'Pobierz zespół z CRM': { main: [[to('Pobierz nieobecności z CRM')]] },
+    'Pobierz nieobecności z CRM': { main: [[to('Handlowcy do arkusza'), to('Nieobecności do arkusza')]] },
+    'Handlowcy do arkusza': { main: [[to('Zapisz handlowców')]] },
+    'Nieobecności do arkusza': { main: [[to('Zapisz nieobecności')]] },
+    ...chain('Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
   });
 
   return {

@@ -4,7 +4,7 @@
   "active": false,
   "nodes": [
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000088",
+      "id": "a1b2c3d4-0000-4000-8000-000000000090",
       "name": "Klik w link",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -18,10 +18,10 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "webhookId": "e1e1e1e1-0000-4000-8000-000000000087"
+      "webhookId": "e1e1e1e1-0000-4000-8000-000000000089"
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000089",
+      "id": "a1b2c3d4-0000-4000-8000-000000000091",
       "name": "Pobierz lead",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -49,7 +49,7 @@
       "alwaysOutputData": true
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000090",
+      "id": "a1b2c3d4-0000-4000-8000-000000000092",
       "name": "Ustaw status",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -62,7 +62,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000092",
+      "id": "a1b2c3d4-0000-4000-8000-000000000094",
       "name": "Czy poprawny?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -80,7 +80,7 @@
           },
           "conditions": [
             {
-              "id": "c0ffee00-0000-4000-8000-000000000091",
+              "id": "c0ffee00-0000-4000-8000-000000000093",
               "leftValue": "={{ $json.ok }}",
               "rightValue": "",
               "operator": {
@@ -96,7 +96,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000093",
+      "id": "a1b2c3d4-0000-4000-8000-000000000095",
       "name": "Wiersz do aktualizacji",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -109,7 +109,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000094",
+      "id": "a1b2c3d4-0000-4000-8000-000000000096",
       "name": "Aktualizuj lead",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -147,7 +147,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000095",
+      "id": "a1b2c3d4-0000-4000-8000-000000000097",
       "name": "Historia",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -160,7 +160,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000096",
+      "id": "a1b2c3d4-0000-4000-8000-000000000098",
       "name": "Zapisz historię",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.7,
@@ -196,7 +196,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000097",
+      "id": "a1b2c3d4-0000-4000-8000-000000000099",
       "name": "Pokaż potwierdzenie",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -221,7 +221,7 @@
       }
     },
     {
-      "id": "a1b2c3d4-0000-4000-8000-000000000098",
+      "id": "a1b2c3d4-0000-4000-8000-000000000100",
       "name": "Pokaż błąd",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,

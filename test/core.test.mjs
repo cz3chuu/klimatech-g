@@ -270,14 +270,14 @@ test('n8n/dist: "Przygotuj dane" (E) – paczki dla Supabase bez tokenu, z klien
   const nodes = { 'Pobierz handlowców': handlowcy, 'Pobierz leady': rows, 'Pobierz historię': [...historia, historia[0]] };
   const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
   const out = new Function('$', code)($).map((i) => i.json);
-  assert.deepEqual(out.map((p) => p.tabela), ['handlowcy', 'leady', 'historia']);
-  const l = Object.fromEntries(out[1].rows.map((r) => [r.lead_id, r]));
+  assert.deepEqual(out.map((p) => p.tabela), ['leady', 'historia']); // zespół płynie odwrotnie: CRM -> arkusz
+  const l = Object.fromEntries(out[0].rows.map((r) => [r.lead_id, r]));
   assert.equal(l['L-023'].klient_id, 'L-007');
   assert.equal(l['L-001'].token, undefined);
   assert.equal(typeof l['L-001'].czas_reakcji_min, 'number');
   assert.equal(l['L-019'].email, null);
-  assert.equal(out[2].rows.length, historia.length); // duplikat wpisu odfiltrowany
-  assert.equal(new Set(out[1].rows.map((r) => Object.keys(r).join())).size, 1); // jednakowe klucze – wymóg upsertu
+  assert.equal(out[1].rows.length, historia.length); // duplikat wpisu odfiltrowany
+  assert.equal(new Set(out[0].rows.map((r) => Object.keys(r).join())).size, 1); // jednakowe klucze – wymóg upsertu
 });
 
 // --- skrzynka „Wpisz lead” (wpisy Ani: telefony, maile; później AI) ---

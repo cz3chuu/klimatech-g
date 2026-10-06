@@ -1,7 +1,8 @@
 // === Węzeł Code: "Obsłuż" (workflow 2 – Obsługa co minutę, tryb: Run Once for All Items) ===
 // Skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min, przy teście ręcznym zawsze) -> poranny raport (raz dziennie).
 // TERAZ w Konfiguracji (np. "2026-10-05 10:00") symuluje czas – do demo poza godzinami pracy.
-const cfg = { ...$('Konfiguracja').first().json, WYJATKI: $('Pobierz wyjątki').all().map((i) => i.json).filter((w) => w.dopasowanie) };
+const cfg = { ...$('Konfiguracja').first().json, WYJATKI: $('Pobierz wyjątki').all().map((i) => i.json).filter((w) => w.dopasowanie),
+  NIEOBECNOSCI: $('Pobierz nieobecności').all().map((i) => i.json).filter((n) => n.handlowiec_id) }; // urlopy, L4 – z CRM przez arkusz
 const now = String(cfg.TERAZ || '').trim() || nowWarsaw();
 const rows = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
 const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);

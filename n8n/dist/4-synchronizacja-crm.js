@@ -1202,7 +1202,7 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
 }
 
 // === Węzeł Code: "Przygotuj dane" (workflow 4 – Synchronizacja z CRM, tryb: Run Once for All Items) ===
-// Arkusz -> Supabase. Zwraca 3 paczki (handlowcy, leady, historia) do wysłania jako upsert przez REST API.
+// Arkusz -> Supabase: leady i historia (upsert przez REST API). Zespół płynie odwrotnie (CRM -> arkusz) – osobne węzły.
 const now = nowWarsaw();
 const tekst = (v) => (v === '' || v === undefined || v === null ? null : String(v));
 const liczba = (v) => (v === '' || v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
@@ -1213,12 +1213,8 @@ function skrot(s) { // FNV-1a 64-bit (2×32) – stabilny identyfikator wpisu hi
   return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
 }
 
-const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id).map((r) => ({
-  handlowiec_id: r.handlowiec_id, imie_nazwisko: tekst(r.imie_nazwisko), email: tekst(r.email), wojewodztwa: tekst(r.wojewodztwa), whatsapp: tekst(r.whatsapp),
-}));
-
 const TEKSTOWE = ['zrodlo', 'firma', 'osoba', 'email', 'telefon', 'miasto', 'wojewodztwo', 'zainteresowanie', 'wiadomosc', 'telefon_norm', 'firma_klucz',
-  'wojewodztwo_zrodlo', 'routing', 'handlowiec_id', 'handlowiec', 'duplikat_of', 'duplikat_typ', 'duplikat_powod', 'status', 'kontakt_kto', 'notatka'];
+  'wojewodztwo_zrodlo', 'routing', 'handlowiec_id', 'handlowiec', 'duplikat_of', 'duplikat_typ', 'duplikat_powod', 'status', 'kontakt_kto', 'notatka', 'zastepstwo_za'];
 const leady = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id).map((r) => {
   const row = { lead_id: r.lead_id };
   TEKSTOWE.forEach((k) => { row[k] = tekst(r[k]); });
@@ -1242,7 +1238,6 @@ const historia = $('Pobierz historię').all().map((i) => i.json).filter((h) => h
 const unikalna = [...new Map(historia.map((h) => [h.id, h])).values()];
 
 return [
-  { json: { tabela: 'handlowcy', on_conflict: 'handlowiec_id', prefer: 'resolution=merge-duplicates,return=minimal', rows: handlowcy } },
   { json: { tabela: 'leady', on_conflict: 'lead_id', prefer: 'resolution=merge-duplicates,return=minimal', rows: leady } },
   { json: { tabela: 'historia', on_conflict: 'id', prefer: 'resolution=ignore-duplicates,return=minimal', rows: unikalna } },
 ].filter((p) => p.json.rows.length);

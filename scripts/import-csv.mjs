@@ -13,7 +13,7 @@ export const KOLUMNY_LEADY = [
   'lead_id', 'data_zgloszenia', 'zrodlo', 'firma', 'osoba', 'email', 'telefon', 'miasto', 'wojewodztwo',
   'zainteresowanie', 'szac_wartosc_pln', 'wiadomosc', 'telefon_norm', 'firma_klucz', 'wojewodztwo_zrodlo',
   'routing', 'handlowiec_id', 'handlowiec', 'duplikat_of', 'duplikat_typ', 'duplikat_powod', 'status',
-  'pierwszy_kontakt', 'kontakt_kto', 'proby', 'sla_poziom', 'token', 'aktualizacja', 'notatka',
+  'pierwszy_kontakt', 'kontakt_kto', 'proby', 'sla_poziom', 'token', 'aktualizacja', 'notatka', 'zastepstwo_za',
 ];
 export const KOLUMNY_HISTORIA = ['czas', 'lead_id', 'zdarzenie', 'kto', 'szczegoly'];
 
