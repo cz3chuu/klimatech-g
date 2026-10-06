@@ -773,6 +773,46 @@ Opiekun: *${odbiorca.nazwa}*
   };
 }
 
+// ---------------- Formularz na stronie: Contact Form 7 -> webhook ----------------
+// Agencja zostawia swoje nazwy pól (domyślne CF7: your-name, your-email, your-tel, your-message…) – tłumaczymy je tutaj.
+// Nasze własne nazwy (firma, osoba, telefon…) też przechodzą. Pola wyboru CF7 przychodzą jako listy.
+const CF7_POLA = {
+  'your-name': 'osoba', 'imie-nazwisko': 'osoba', 'imie': 'osoba', 'name': 'osoba', 'osoba': 'osoba',
+  'your-email': 'email', 'email': 'email', 'e-mail': 'email',
+  'your-tel': 'telefon', 'your-phone': 'telefon', 'tel': 'telefon', 'telefon': 'telefon', 'phone': 'telefon',
+  'your-company': 'firma', 'company': 'firma', 'firma': 'firma',
+  'your-city': 'miasto', 'city': 'miasto', 'miasto': 'miasto',
+  'your-region': 'wojewodztwo', 'region': 'wojewodztwo', 'wojewodztwo': 'wojewodztwo',
+  'your-interest': 'zainteresowanie', 'zainteresowanie': 'zainteresowanie', 'produkt': 'zainteresowanie',
+  'wartosc': 'szac_wartosc_pln', 'budzet': 'szac_wartosc_pln', 'szac_wartosc_pln': 'szac_wartosc_pln',
+  'your-message': 'wiadomosc', 'message': 'wiadomosc', 'wiadomosc': 'wiadomosc',
+  'kim-jestes': 'typ_klienta', 'typ-klienta': 'typ_klienta',
+  'zgoda': 'zgoda', 'your-consent': 'zgoda', 'zrodlo': 'zrodlo',
+};
+function zFormularzaStrony(body) {
+  const out = {};
+  for (const [k, v] of Object.entries(body || {})) {
+    const klucz = String(k).toLowerCase().trim();
+    const pole = CF7_POLA[klucz] || (klucz.startsWith('acceptance') ? 'zgoda' : null);
+    if (!pole) continue; // pola techniczne CF7 (_wpcf7…) i nieznane pomijamy
+    const w = Array.isArray(v) ? v.filter((x) => String(x).trim()).join(', ') : v;
+    if (w === undefined || w === null || String(w).trim() === '') continue;
+    out[pole] = typeof w === 'string' ? w.trim() : w;
+  }
+  if (out.zgoda !== undefined) out.zgoda = !['0', 'false', 'nie'].includes(String(out.zgoda).toLowerCase());
+  if (out.wojewodztwo && /nie wiem|wybierz|^-+$/i.test(out.wojewodztwo)) delete out.wojewodztwo;
+  if (out.szac_wartosc_pln !== undefined) out.szac_wartosc_pln = Number(String(out.szac_wartosc_pln).replace(/[^\d]/g, '')) || 0;
+  if (out.typ_klienta) { out.wiadomosc = `[${out.typ_klienta}] ${out.wiadomosc || ''}`.trim(); delete out.typ_klienta; }
+  out.zrodlo = out.zrodlo || 'formularz';
+  return out;
+}
+// Klucz dostępu do webhooka (WEBHOOK_KLUCZ w Konfiguracji): w adresie ?klucz=… albo w nagłówku X-Klimatech-Token.
+// Pusty WEBHOOK_KLUCZ = bez sprawdzania (tylko do testów lokalnych).
+function kluczPoprawny(cfg, klucz) {
+  const k = String(cfg.WEBHOOK_KLUCZ || '').trim();
+  return !k || String(klucz || '').trim() === k;
+}
+
 // ---------------- Skrzynka „Wpisz lead” (workflow F) ----------------
 // Wspólne wejście dla wszystkiego spoza formularza: telefony i maile wpisywane przez Anię, w przyszłości AI z maili.
 // Wiersz czeka, dopóki kolumna „akcja” = SPRAWDŹ (np. propozycja AI) – Ania zmienia ją na OK albo czyści.
@@ -1258,11 +1298,19 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
 }
 
 // === Węzeł Code: "Przetwórz lead" (workflow 1 – Przyjęcie leada, tryb: Run Once for All Items) ===
-// Jedno wejście dla: webhooka strony WWW (JSON) i formularza klienta. Dla formularza dokłada stronę z podziękowaniem.
+// Jedno wejście dla: formularza na stronie (Contact Form 7 -> webhook, JSON) i formularza klienta (makieta strony).
+// Webhook: najpierw klucz dostępu, potem tłumaczenie pól CF7. Dla formularza n8n – strona z podziękowaniem.
 // Wyjątki z zakładki „Wyjątki” (np. Termex -> biuro); brak zakładki = brak wyjątków
 const cfg = { ...$('Konfiguracja').first().json, WYJATKI: $('Pobierz wyjątki').all().map((i) => i.json).filter((w) => w.dopasowanie),
   NIEOBECNOSCI: $('Pobierz nieobecności').all().map((i) => i.json).filter((n) => n.handlowiec_id) }; // urlopy, L4 – z CRM przez arkusz
-const body = $('Zgłoszenie').first().json || {};
+let body = $('Zgłoszenie').first().json || {};
+if (body._wejscie === 'webhook') {
+  if (!kluczPoprawny(cfg, body._klucz)) {
+    const errors = ['Brak dostępu: nieprawidłowy lub brakujący klucz (parametr ?klucz= albo nagłówek X-Klimatech-Token).'];
+    return [{ json: { valid: false, wejscie: 'webhook', errors, response: { ok: false, errors } } }];
+  }
+  body = { ...zFormularzaStrony(body), _wejscie: 'webhook' };
+}
 const existing = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
 const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);
 
