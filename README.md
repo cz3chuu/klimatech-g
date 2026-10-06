@@ -23,7 +23,7 @@ Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy
 | Klient pisze drugi raz | powiadomienie „⚠ PONOWIENIE – klient czeka”, ten sam opiekun |
 | Dwie osoby dzwonią i podają różne ceny | po rozmowie handlowiec odpisuje na WhatsAppie `1 + notatka`; przy kolejnym zgłoszeniu tego klienta powiadomienie pokazuje **kto rozmawiał, kiedy i co ustalił** |
 | Handlowcy czytają WhatsAppa | krótkie powiadomienie na WhatsApp (Green API) + mail jako kopia |
-| Telefon w ciągu doby, eskalacja po 2 dniach | SLA liczone w **minutach roboczych** (pn–pt 8–16, święta PL): przypomnienie po 4 h, „po SLA” po 1 dniu, eskalacja do Marka po 2 dniach |
+| Telefon w ciągu doby, eskalacja po 2 dniach | terminy w **godzinach pracy** (pn–pt 8–16, święta PL): przypomnienie po 4 h; **doba robocza = do 16:00 następnego dnia roboczego** po zgłoszeniu; eskalacja = do 16:00 drugiego dnia roboczego – bez osobnych maili, w porannych zestawieniach |
 | Lead nie może „przeczekać” – także zaległy z importu albo zignorowany po eskalacji | **poranny raport** w dni robocze: każdy dostaje listę swoich otwartych leadów, Marek wszystko po SLA i regiony bez handlowca – codziennie, aż lead zostanie zamknięty |
 | Maile i telefony wpisywane przez biuro | zakładka arkusza **„Wpisz lead”** – Ania wpisuje wiersz, system odpisuje w wierszu ✅ / ⚠ / ❌ |
 | Szef ma widzieć wszystko | **mini CRM** (Supabase + prosta strona): lista leadów, karta klienta z osią czasu „kto, co, kiedy”, statystyki handlowców |
@@ -75,7 +75,7 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 7. **Zapis.** Nowy wiersz w *Leady* (z `lead_id`, `token` do linków, `sla_poziom = 0`) i wpisy w *Historia* (`utworzono`, `przypisano`, `powiadomienie`, kto, skąd, zgoda RODO).
 8. **Powiadomienie.** WhatsApp do opiekuna (krótko: firma, telefon do kliknięcia, wartość, wiadomość, `🆔 L-041`, instrukcja odpowiedzi) + mail z przyciskami statusu. W trybie testowym wszystko idzie na numer i skrzynkę testową, a prawdziwy adresat jest w nagłówku `[TEST → Ewa Sowa]`.
 9. **Kontakt.** Handlowiec dzwoni i odpowiada na wiadomość: `1` dodzwoniłem się · `2` nie odebrał · `3` umówione · `4` niezainteresowany, opcjonalnie z notatką (`1 chce ofertę na 10 szt.`). Workflow 2 co minutę pobiera wiadomości, rozpoznaje leada po `🆔` z cytowanej wiadomości, zapisuje status, `pierwszy_kontakt`, notatkę i odsyła „✅ Zapisano”. „Nie odebrał” nie zatrzymuje zegara SLA.
-10. **SLA.** Co 15 min w godzinach pracy: lead bez kontaktu > 4 h → przypomnienie do opiekuna, > 1 dzień → „po SLA”, > 2 dni → **eskalacja do Marka**. Każdy poziom wysyłany raz, jedna zbiorcza wiadomość na odbiorcę. Lead z weekendu startuje w poniedziałek 8:00.
+10. **SLA.** Co 15 min w godzinach pracy: lead bez kontaktu > 4 h robocze → przypomnienie do opiekuna (jedyna osobna wiadomość SLA). **Termin doby roboczej** = 16:00 następnego dnia roboczego po dniu zgłoszenia (pon. 9:00 → wt. 16:00; pt. 17:00 lub sobota → pon. 16:00), **eskalacja** = 16:00 drugiego dnia roboczego. Oba progi zapisują się w `sla_poziom`, ale bez maili – rano lead pojawia się w zestawieniu handlowca jako „termin dziś”, a po terminie i przy eskalacji także u Marka.
 11. **Poranny raport.** W dzień roboczy, przy pierwszym przebiegu od 8:00: handlowiec dostaje mail (pełna lista z przyciskami statusu) i WhatsApp (5 najpilniejszych) ze **wszystkimi swoimi otwartymi leadami** (nowe i „nie odebrał”), Marek – wszystko po SLA oraz leady z regionów bez handlowca, Ania – leady do przypisania. Kolejność: najpierw **ponowienia** (klient pisał drugi raz), potem **wartość × dni robocze czekania**. Lead wraca w raporcie codziennie, aż ktoś go zamknie – dzięki temu nie ginie ani zaległość z importu (jej `sla_poziom` jest ustawiony na dzień importu, więc progi jej nie „obudzą”), ani lead zignorowany po eskalacji (poziom 3 to ostatnie powiadomienie progowe).
 12. **CRM.** Co minutę arkusz trafia do Supabase. Strona CRM pokazuje listę, kartę klienta (wszystkie zgłoszenia, ostatnie ustalenia, oś czasu) i statystyki handlowców.
 
@@ -86,7 +86,7 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 | Reguła | Wartość | Gdzie |
 |---|---|---|
 | Godziny pracy | pn–pt 8:00–16:00, święta PL (z Wielkanocą liczoną algorytmem, Wigilia od 2025) | `isBusinessDay`, `businessMinutes` |
-| Progi SLA | 240 / 480 / 960 minut roboczych | `SLA_PROGI` |
+| Progi SLA | 4 h robocze (`SLA_PROGI`); termin doby i eskalacji z kalendarza dni roboczych | `slaLevelAt`, `terminDoby`, `terminEskalacji` |
 | Start zegara | zgłoszenie po 16:00 lub w weekend → najbliższy dzień roboczy 8:00 | `slaStart` |
 | Statusy zamykające SLA | `dodzwoniono`, `umowione`, `niezainteresowany` | `STATUSY_ZAMYKAJACE_SLA` |
 | Duplikat pewny / możliwy | telefon, e-mail / nazwa firmy, firmowa domena | `findDuplicate` |
@@ -115,6 +115,7 @@ scripts/build-n8n.mjs           src -> dist
 scripts/build-workflows.mjs     dist + konfiguracja -> workflow JSON (cała definicja węzłów i połączeń)
 scripts/import-csv.mjs          eksport arkusza Ani -> pliki do importu + docs/raport.md
 scripts/serve-crm.mjs           lokalny serwer strony CRM (+ tryb podglądu /?demo)
+scripts/makiety-zestawien.mjs   makiety porannych zestawień (Marek + handlowiec, mail i WhatsApp) -> docs/makiety/
 crm/index.html                  mini CRM (jeden plik, supabase-js z CDN)
 supabase/schema.sql             tabele, indeksy, RLS (odczyt tylko po zalogowaniu)
 data/klimatech-*.csv            załączniki od klienta (eksport arkusza, handlowcy – oryginał)
