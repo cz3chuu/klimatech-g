@@ -13,9 +13,10 @@ async function demo() {
   const { createRequire } = await import('node:module');
   const core = createRequire(import.meta.url)('../n8n/src/core.js');
   const { parseCsv, importLeads } = await import('./import-csv.mjs');
-  const handlowcy = parseCsv(readFileSync('data/klimatech-handlowcy.csv', 'utf8'));
+  const handlowcy = parseCsv(readFileSync('data/handlowcy.csv', 'utf8'));
+  const wyjatki = parseCsv(readFileSync('data/wyjatki.csv', 'utf8'));
   const teraz = '2026-10-05 12:00';
-  const { rows, historia } = importLeads(parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8')), handlowcy, teraz);
+  const { rows, historia } = importLeads(parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8')), handlowcy, teraz, wyjatki);
   const leady = rows.map(({ token, ...r }) => ({
     ...r,
     klient_id: r.duplikat_typ === 'pewny' && r.duplikat_of ? r.duplikat_of : r.lead_id,

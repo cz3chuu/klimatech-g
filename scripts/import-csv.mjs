@@ -42,12 +42,13 @@ export function parseCsv(text) {
 const csvCell = (v) => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 const toCsv = (cols, rows) => [cols.join(','), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(','))].join('\n') + '\n';
 
-// Rdzeń na danych historycznych: chronologicznie, każdy lead względem wcześniejszych
-export function importLeads(leadyRaw, handlowcy, now) {
+// Rdzeń na danych historycznych: chronologicznie, każdy lead względem wcześniejszych – według AKTUALNYCH reguł
+// (wspólne regiony, wyjątki), więc ponowny import jest też migracją zaległych leadów do nowych opiekunów.
+export function importLeads(leadyRaw, handlowcy, now, wyjatki = []) {
   const sorted = [...leadyRaw].sort((a, b) => a.data_zgloszenia.localeCompare(b.data_zgloszenia));
   const out = [], historia = [];
   for (const src of sorted) {
-    const { row, dup } = core.buildLeadRow(src, out, handlowcy, now, { lead_id: src.lead_id, data_zgloszenia: src.data_zgloszenia });
+    const { row, dup, wyjatek, podzial } = core.buildLeadRow(src, out, handlowcy, now, { lead_id: src.lead_id, data_zgloszenia: src.data_zgloszenia, wyjatki });
     if (src.pierwszy_kontakt) {
       row.status = 'dodzwoniono';
       row.pierwszy_kontakt = src.pierwszy_kontakt;
@@ -58,7 +59,7 @@ export function importLeads(leadyRaw, handlowcy, now) {
     if (row.status === 'nowy' && row.duplikat_typ !== 'pewny') row.sla_poziom = core.slaLevel(core.businessMinutes(row.data_zgloszenia, now));
     row.aktualizacja = now;
     out.push(row);
-    historia.push({ czas: row.data_zgloszenia, lead_id: row.lead_id, zdarzenie: 'import', kto: 'Ania (biuro)', szczegoly: `z arkusza biura; ${row.routing}${dup ? `; ${dup.typ} duplikat ${dup.original.lead_id} (${dup.powod})` : ''}` });
+    historia.push({ czas: row.data_zgloszenia, lead_id: row.lead_id, zdarzenie: 'import', kto: 'Ania (biuro)', szczegoly: `z arkusza biura; ${row.routing}: ${row.handlowiec || '—'}${wyjatek ? ` (wyjątek: ${wyjatek.opis || wyjatek.wartosc})` : ''}${podzial ? ' (region wspólny)' : ''}${dup ? `; ${dup.typ} duplikat ${dup.original.lead_id} (${dup.powod})` : ''}` });
   }
   // Kontakty z arkusza biura jako wpisy historii – oś czasu w CRM od pierwszego dnia
   out.filter((r) => r.pierwszy_kontakt).forEach((r) => historia.push({
@@ -140,10 +141,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const i = process.argv.indexOf('--now');
   const now = i > -1 ? process.argv[i + 1] : core.nowWarsaw();
   const leady = parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8'));
-  const handlowcy = parseCsv(readFileSync('data/klimatech-handlowcy.csv', 'utf8'));
-  const { rows, historia } = importLeads(leady, handlowcy, now);
+  // Aktualne przypisania (data/handlowcy.csv) i wyjątki; oryginalny załącznik klienta: data/klimatech-handlowcy.csv
+  const handlowcy = parseCsv(readFileSync('data/handlowcy.csv', 'utf8'));
+  const wyjatki = parseCsv(readFileSync('data/wyjatki.csv', 'utf8'));
+  const { rows, historia } = importLeads(leady, handlowcy, now, wyjatki);
   writeFileSync('data/leady-import.csv', toCsv(KOLUMNY_LEADY, rows));
   writeFileSync('data/historia-import.csv', toCsv(KOLUMNY_HISTORIA, historia));
-  writeFileSync('docs/raport.md', buildReport(rows, handlowcy, now));
-  console.log(`OK: ${rows.length} leadów -> data/leady-import.csv, raport -> docs/raport.md (stan na ${now})`);
+  if (process.argv.includes('--raport')) writeFileSync('docs/raport.md', buildReport(rows, handlowcy, now));
+  console.log(`OK: ${rows.length} leadów -> data/leady-import.csv, data/historia-import.csv (stan na ${now})${process.argv.includes('--raport') ? ', raport -> docs/raport.md' : ''}`);
 }

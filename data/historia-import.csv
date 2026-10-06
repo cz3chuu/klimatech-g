@@ -1,53 +1,53 @@
 czas,lead_id,zdarzenie,kto,szczegoly
-2026-09-21 08:14,L-001,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-21 10:02,L-002,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-21 16:47,L-003,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-09-22 07:55,L-004,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-22 09:30,L-005,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-21 08:14,L-001,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona
+2026-09-21 10:02,L-002,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
+2026-09-21 16:47,L-003,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona (region wspólny)
+2026-09-22 07:55,L-004,import,Ania (biuro),z arkusza biura; handlowiec: Piotr Nowak
+2026-09-22 09:30,L-005,import,Ania (biuro),z arkusza biura; handlowiec: Bartosz Zając
 2026-09-22 11:05,L-004,status,Piotr Nowak,Dodzwoniono się (wpis z arkusza biura)
-2026-09-22 12:12,L-006,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-22 14:20,L-007,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-23 08:05,L-008,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-22 12:12,L-006,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
+2026-09-22 14:20,L-007,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona
+2026-09-23 08:05,L-008,import,Ania (biuro),z arkusza biura; handlowiec: Michał Kruk
 2026-09-23 08:30,L-006,status,Ewa Sowa,Dodzwoniono się (wpis z arkusza biura)
 2026-09-23 10:15,L-001,status,Tomasz Wrona,Dodzwoniono się (wpis z arkusza biura)
-2026-09-23 10:44,L-009,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-09-23 13:15,L-010,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-23 10:44,L-009,import,Ania (biuro),z arkusza biura; handlowiec: Michał Kruk (region wspólny)
+2026-09-23 13:15,L-010,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
 2026-09-23 15:20,L-008,status,Michał Kruk,Dodzwoniono się (wpis z arkusza biura)
-2026-09-24 07:40,L-011,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-24 09:10,L-012,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-24 07:40,L-011,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
+2026-09-24 09:10,L-012,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
 2026-09-24 10:00,L-010,status,Katarzyna Lis,Dodzwoniono się (wpis z arkusza biura)
-2026-09-24 11:25,L-013,import,Ania (biuro),z arkusza biura; bez_opiekuna
+2026-09-24 11:25,L-013,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis (region wspólny)
 2026-09-24 14:45,L-012,status,Katarzyna Lis,Dodzwoniono się (wpis z arkusza biura)
-2026-09-24 15:50,L-014,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-25 08:01,L-015,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-25 08:09,L-016,import,Ania (biuro),z arkusza biura; handlowiec; pewny duplikat L-015 (telefon)
+2026-09-24 15:50,L-014,import,Ania (biuro),z arkusza biura; handlowiec: Bartosz Zając
+2026-09-25 08:01,L-015,import,Ania (biuro),z arkusza biura; handlowiec: Piotr Nowak
+2026-09-25 08:09,L-016,import,Ania (biuro),z arkusza biura; handlowiec: Piotr Nowak; pewny duplikat L-015 (telefon)
 2026-09-25 09:30,L-014,status,Bartosz Zając,Dodzwoniono się (wpis z arkusza biura)
-2026-09-25 12:30,L-017,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-25 12:30,L-017,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
 2026-09-25 14:05,L-002,status,Katarzyna Lis,Dodzwoniono się (wpis z arkusza biura)
-2026-09-25 15:20,L-019,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-26 09:45,L-018,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-26 14:35,L-020,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-09-28 08:20,L-021,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-28 10:05,L-022,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-25 15:20,L-019,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
+2026-09-26 09:45,L-018,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona
+2026-09-26 14:35,L-020,import,Ania (biuro),z arkusza biura; handlowiec: Bartosz Zając (region wspólny)
+2026-09-28 08:20,L-021,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona
+2026-09-28 10:05,L-022,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
 2026-09-28 12:10,L-021,status,Tomasz Wrona,Dodzwoniono się (wpis z arkusza biura)
-2026-09-28 13:40,L-023,import,Ania (biuro),z arkusza biura; handlowiec; pewny duplikat L-007 (telefon)
-2026-09-28 16:00,L-024,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-29 07:30,L-025,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-29 09:15,L-026,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-09-29 11:50,L-027,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-30 08:00,L-028,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-28 13:40,L-023,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona; pewny duplikat L-007 (telefon)
+2026-09-28 16:00,L-024,import,Ania (biuro),z arkusza biura; handlowiec: Piotr Nowak
+2026-09-29 07:30,L-025,import,Ania (biuro),z arkusza biura; handlowiec: Bartosz Zając
+2026-09-29 09:15,L-026,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona (region wspólny)
+2026-09-29 11:50,L-027,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
+2026-09-30 08:00,L-028,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
 2026-09-30 09:10,L-028,status,Ewa Sowa,Dodzwoniono się (wpis z arkusza biura)
 2026-09-30 10:20,L-017,status,Ewa Sowa,Dodzwoniono się (wpis z arkusza biura)
-2026-09-30 10:30,L-029,import,Ania (biuro),z arkusza biura; handlowiec
-2026-09-30 13:05,L-030,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-01 08:45,L-031,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-01 10:10,L-032,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-01 12:00,L-033,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-10-01 14:30,L-034,import,Ania (biuro),z arkusza biura; handlowiec
+2026-09-30 10:30,L-029,import,Ania (biuro),z arkusza biura; handlowiec: Bartosz Zając
+2026-09-30 13:05,L-030,import,Ania (biuro),z arkusza biura; handlowiec: Michał Kruk
+2026-10-01 08:45,L-031,import,Ania (biuro),z arkusza biura; wyjatek: Ania (biuro) (wyjątek: Termex z Płocka zawsze obsługuje biuro)
+2026-10-01 10:10,L-032,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
+2026-10-01 12:00,L-033,import,Ania (biuro),z arkusza biura; handlowiec: Michał Kruk (region wspólny)
+2026-10-01 14:30,L-034,import,Ania (biuro),z arkusza biura; handlowiec: Piotr Nowak
 2026-10-01 15:10,L-025,status,Bartosz Zając,Dodzwoniono się (wpis z arkusza biura)
-2026-10-02 08:10,L-035,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-02 09:40,L-036,import,Ania (biuro),z arkusza biura; bez_opiekuna
-2026-10-02 11:20,L-037,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-02 15:05,L-038,import,Ania (biuro),z arkusza biura; handlowiec; pewny duplikat L-031 (telefon)
-2026-10-03 09:00,L-039,import,Ania (biuro),z arkusza biura; handlowiec
-2026-10-04 19:30,L-040,import,Ania (biuro),z arkusza biura; handlowiec
+2026-10-02 08:10,L-035,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
+2026-10-02 09:40,L-036,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis (region wspólny)
+2026-10-02 11:20,L-037,import,Ania (biuro),z arkusza biura; handlowiec: Ewa Sowa
+2026-10-02 15:05,L-038,import,Ania (biuro),z arkusza biura; wyjatek: Ania (biuro) (wyjątek: Termex z Płocka zawsze obsługuje biuro); pewny duplikat L-031 (telefon)
+2026-10-03 09:00,L-039,import,Ania (biuro),z arkusza biura; handlowiec: Katarzyna Lis
+2026-10-04 19:30,L-040,import,Ania (biuro),z arkusza biura; handlowiec: Tomasz Wrona

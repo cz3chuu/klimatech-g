@@ -588,8 +588,8 @@ function rysujHandlowcow() {
   const grupy = dane.handlowcy.map((h) => ({ nazwa: h.imie_nazwisko, woj: (h.wojewodztwa || '').replace(/;/g, ', '), leady: u.filter((l) => l.handlowiec_id === h.handlowiec_id) }));
   const bez = u.filter((l) => l.routing === 'bez_opiekuna');
   if (bez.length) grupy.push({ nazwa: 'Marek', woj: [...new Set(bez.map((l) => l.wojewodztwo))].join(', '), leady: bez, brak: true });
-  const ust = u.filter((l) => l.routing === 'do_ustalenia');
-  if (ust.length) grupy.push({ nazwa: 'Ania (biuro)', woj: 'brak województwa', leady: ust });
+  const ust = u.filter((l) => l.routing === 'do_ustalenia' || l.handlowiec_id === 'ANIA'); // do przypisania + wyjątki (np. Termex)
+  if (ust.length) grupy.push({ nazwa: 'Ania (biuro)', woj: 'wyjątki i leady do przypisania', leady: ust });
   $('handlowcy').innerHTML = grupy.map((g) => {
     const k = g.leady.filter((l) => l.pierwszy_kontakt), cz = g.leady.filter((l) => !l.pierwszy_kontakt);
     const pct = g.leady.length ? Math.round((k.length / g.leady.length) * 100) : 0;

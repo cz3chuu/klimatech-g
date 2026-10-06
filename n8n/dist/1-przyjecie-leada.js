@@ -193,22 +193,54 @@ function findDuplicate(lead, existing) {
 
 // ---------------- Routing ----------------
 
+// województwo -> lista opiekunów. Województwo wpisane u dwóch osób (zakładka Handlowcy) = region wspólny.
 function parseHandlowcy(rows) {
   const map = {};
   rows.forEach((h) => String(h.wojewodztwa || '').split(';').map((w) => w.trim().toLowerCase()).filter(Boolean)
-    .forEach((w) => { map[w] = { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email }; }));
+    .forEach((w) => { (map[w] = map[w] || []).push({ id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email }); }));
   return map;
 }
-function route(wojewodztwo, handlowcyMap) {
+// Region wspólny: lead dostaje opiekun z mniejszą liczbą leadów z tego województwa (pół na pół), przy remisie – losowo.
+// Czysty los przy kilku leadach miesięcznie mógłby dać np. 5:1 – przy prowizjach to proszenie się o spór.
+function route(wojewodztwo, handlowcyMap, existing = []) {
   if (!wojewodztwo) return { routing: 'do_ustalenia', handlowiec: null };
-  const h = handlowcyMap[wojewodztwo];
-  return h ? { routing: 'handlowiec', handlowiec: h } : { routing: 'bez_opiekuna', handlowiec: null };
+  const lista = handlowcyMap[wojewodztwo] || [];
+  if (!lista.length) return { routing: 'bez_opiekuna', handlowiec: null };
+  if (lista.length === 1) return { routing: 'handlowiec', handlowiec: lista[0] };
+  const ile = (id) => existing.filter((r) => r.wojewodztwo === wojewodztwo && r.duplikat_typ !== 'pewny' && r.handlowiec_id === id).length;
+  const liczby = lista.map((h) => ({ h, n: ile(h.id) }));
+  const min = Math.min(...liczby.map((x) => x.n));
+  const kandydaci = liczby.filter((x) => x.n === min);
+  const wybrany = kandydaci[Math.floor(Math.random() * kandydaci.length)].h;
+  return { routing: 'handlowiec', handlowiec: wybrany, podzial: liczby.map((x) => `${x.h.nazwa} ${x.n}`).join(' / ') };
+}
+
+// Wyjątki (zakładka „Wyjątki”): dopasowanie = firma | telefon | email | domena, wartosc, miasto (opcjonalnie), przypisz_do = ANIA | MAREK | H1…
+// Firma: wszystkie słowa klucza z reguły muszą wystąpić w kluczu firmy leada („termex” łapie „ZPH Termex” i „Termex ZPH Sp. j.”).
+function findWyjatek(lead, wyjatki = []) {
+  return wyjatki.find((w) => {
+    const typ = String(w.dopasowanie || '').trim().toLowerCase(), wartosc = String(w.wartosc || '').trim();
+    if (!wartosc || !String(w.przypisz_do || '').trim()) return false;
+    if (String(w.miasto || '').trim() && String(w.miasto).trim().toLowerCase() !== String(lead.miasto || '').trim().toLowerCase()) return false;
+    if (typ === 'firma') { const t = (lead.firma_klucz || '').split(' '); return companyKey(wartosc).split(' ').every((x) => x && t.includes(x)); }
+    if (typ === 'telefon') return !!lead.telefon_norm && normalizePhone(wartosc) === lead.telefon_norm;
+    if (typ === 'email') return !!lead.email_norm && normalizeEmail(wartosc) === lead.email_norm;
+    if (typ === 'domena') return !!lead.email_norm && lead.email_norm.split('@')[1] === wartosc.toLowerCase().replace(/^@/, '');
+    return false;
+  }) || null;
 }
 function marekOf(cfg) { return { id: 'MAREK', nazwa: 'Marek', email: cfg.MAREK_EMAIL, whatsapp: cfg.MAREK_WHATSAPP || '' }; }
 function aniaOf(cfg) { return { id: 'ANIA', nazwa: 'Ania (biuro)', email: cfg.ANIA_EMAIL, whatsapp: cfg.ANIA_WHATSAPP || '' }; }
+function osobaPoId(id, handlowcyRows, cfg) {
+  if (id === 'ANIA') return aniaOf(cfg);
+  if (id === 'MAREK') return marekOf(cfg);
+  const h = handlowcyRows.find((x) => x.handlowiec_id === id);
+  return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email, whatsapp: h.whatsapp || '' } : null;
+}
 function recipientFor(row, handlowcyRows, cfg) {
   if (row.routing === 'bez_opiekuna') return marekOf(cfg);
   if (row.routing === 'do_ustalenia') return aniaOf(cfg);
+  if (row.handlowiec_id === 'ANIA' || row.handlowiec_id === 'MAREK') return osobaPoId(row.handlowiec_id, handlowcyRows, cfg);
   const h = handlowcyRows.find((x) => x.handlowiec_id === row.handlowiec_id);
   return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email, whatsapp: h.whatsapp || '' } : aniaOf(cfg);
 }
@@ -419,14 +451,21 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
   const firma_klucz = companyKey(inp.firma);
   const woj = normalizeWojewodztwo(inp.wojewodztwo, inp.miasto);
   const dup = findDuplicate({ telefon_norm, email_norm, firma_klucz }, existing);
+  const wyjatek = findWyjatek({ firma_klucz, telefon_norm, email_norm, miasto: inp.miasto }, opts.wyjatki || []);
 
-  // Pewny duplikat zostaje u opiekuna oryginału (ciągłość relacji)
-  let routing, handlowiec;
-  if (dup && dup.typ === 'pewny' && dup.original) {
+  // Kolejność: wyjątek (np. Termex -> biuro) > pewny duplikat (zostaje u opiekuna oryginału) > region (wspólny: pół na pół)
+  let routing, handlowiec, podzial = '';
+  if (wyjatek) {
+    const id = String(wyjatek.przypisz_do).trim().toUpperCase();
+    const nazwa = id === 'ANIA' ? 'Ania (biuro)' : id === 'MAREK' ? 'Marek'
+      : ((handlowcyRows.find((h) => String(h.handlowiec_id).toUpperCase() === id) || {}).imie_nazwisko || id);
+    routing = 'wyjatek';
+    handlowiec = { id, nazwa };
+  } else if (dup && dup.typ === 'pewny' && dup.original) {
     routing = dup.original.routing;
     handlowiec = dup.original.handlowiec_id ? { id: dup.original.handlowiec_id, nazwa: dup.original.handlowiec } : null;
   } else {
-    ({ routing, handlowiec } = route(woj.wojewodztwo, hMap));
+    ({ routing, handlowiec, podzial = '' } = route(woj.wojewodztwo, hMap, existing));
   }
 
   const row = {
@@ -459,7 +498,7 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
     token: makeToken(),
     aktualizacja: now,
   };
-  return { row, dup };
+  return { row, dup, wyjatek, podzial };
 }
 
 // Data faktycznego kontaktu (np. telefon o 9:10 wpisany o 11:00) – zegar SLA liczy się od niej; przyszłe daty ignorujemy
@@ -488,7 +527,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   const errors = validateInput(inp);
   if (errors.length) return { valid: false, errors, response: { ok: false, errors } };
 
-  const { row, dup } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now) });
+  const { row, dup, wyjatek, podzial } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now), wyjatki: cfg.WYJATKI || [] });
   // Podwójne kliknięcie / ponowne wysłanie tych samych danych w ciągu 30 min: nie zapisujemy drugi raz i nie alarmujemy handlowca
   const powt = powtorneWyslanie(row, existing, now);
   if (powt) {
@@ -524,6 +563,12 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
     subject = `⚠ PONOWIENIE – klient czeka: ${opis}`;
     intro = `Klient pisze <b>drugi raz</b>. Pierwsze zapytanie ${original.lead_id} z ${original.data_zgloszenia} nadal bez kontaktu ` +
       `(dopasowanie po: ${dup.powod}). Priorytet – zadzwoń jak najszybciej.`;
+  } else if (row.routing === 'wyjatek') {
+    const powod = String(wyjatek.opis || '').trim() || 'reguła wyjątku';
+    waNaglowek = '📌 *LEAD Z WYJĄTKU*';
+    waInfo = `Klient obsługiwany poza regionem: ${powod}.`;
+    subject = `Lead z wyjątku: ${opis} – ${row.zainteresowanie || 'zapytanie'}, ${zl(row.szac_wartosc_pln)}`;
+    intro = `Ten klient zgodnie z ustaleniami trafia do Ciebie niezależnie od województwa (<b>${esc(powod)}</b>).`;
   } else if (row.routing === 'bez_opiekuna') {
     waNaglowek = '🟠 *LEAD BEZ OPIEKUNA*';
     waInfo = 'Województwo bez handlowca – lead u Pana do decyzji, kto obsługuje region.';
@@ -537,6 +582,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   } else {
     waNaglowek = '🔔 *NOWY LEAD*';
     if (row.wojewodztwo_zrodlo === 'miasto') waInfo = `Województwo ustalone z miasta (${row.miasto}).`;
+    if (podzial) waInfo += `${waInfo ? '\n' : ''}Region wspólny (${row.wojewodztwo}) – leady dzielone po równo.`;
     subject = `Nowy lead: ${opis} – ${row.zainteresowanie || 'zapytanie'}, ${zl(row.szac_wartosc_pln)}`;
     intro = row.wojewodztwo_zrodlo === 'miasto'
       ? `Województwo ustalone automatycznie na podstawie miasta (${esc(row.miasto)}).`
@@ -560,19 +606,42 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
     ? wrapTestModeWa({ chatId: waChatId(odbiorca.whatsapp), nazwa: odbiorca.nazwa, message: waLeadMessage(row, waNaglowek, waInfo, target) }, cfg)
     : null;
 
+  // Lead powyżej progu: informacja dla Marka jako lidera sprzedaży – lead zostaje u handlowca
+  const prog = Number(cfg.PROG_LIDER) || 50000;
+  let lider = null;
+  if (row.szac_wartosc_pln > prog && odbiorca.id !== 'MAREK') {
+    const m = marekOf(cfg);
+    const lSubject = `💰 Duży lead ${zl(row.szac_wartosc_pln)}: ${row.firma || row.osoba} → ${odbiorca.nazwa}`;
+    const lHtml = `<div style="font-family:Arial,sans-serif;font-size:14px;max-width:600px">
+<p>Informacyjnie: lead powyżej ${zl(prog)}. Obsługuje go <b>${esc(odbiorca.nazwa)}</b> – nic nie musisz robić, stan kontaktu zobaczysz w porannym raporcie.</p>${leadTable(row)}
+<p style="color:#888;font-size:12px">${row.lead_id}${pewny ? ` → dotyczy ${original.lead_id} (ponowienie)` : ''} · zgłoszono ${row.data_zgloszenia}</p></div>`;
+    lider = {
+      email: String(cfg.KANAL || 'mail') !== 'whatsapp' ? wrapTestMode({ to: m.email, cc: '', subject: lSubject, html: lHtml }, cfg) : null,
+      whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(m.whatsapp), nazwa: m.nazwa, message:
+        `💰 *DUŻY LEAD* · ${zl(row.szac_wartosc_pln)}${pewny ? ' · ponowienie' : ''}
+*${row.firma || row.osoba}* · ${row.wojewodztwo || 'woj. nieustalone'}
+Opiekun: *${odbiorca.nazwa}*
+📞 ${formatPhone(row.telefon_norm) || row.email || '—'}
+🆔 ${target.lead_id}
+ℹ️ Informacyjnie – lead zostaje u handlowca.` }, cfg) : null,
+    };
+  }
+
   const historia = [
     { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: wprowadzil, szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})${row.data_zgloszenia !== now ? `; kontakt klienta: ${row.data_zgloszenia}` : ''}${inp.zgoda ? '; zgoda na kontakt (RODO): tak' : ''}` },
   ];
   if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', kto: 'system', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
-  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}` });
+  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}${wyjatek ? ` (wyjątek: ${String(wyjatek.opis || wyjatek.wartosc).trim()})` : ''}${podzial ? ` (region wspólny, dotychczas: ${podzial})` : ''}` });
   if (String(cfg.KANAL || 'mail') !== 'whatsapp') historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
   if (whatsapp) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `WhatsApp do ${odbiorca.nazwa}` });
+  if (lider) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `lider sprzedaży: Marek (wartość powyżej ${zl(prog)})` });
 
   return {
     valid: true,
     row,
     email,
     whatsapp,
+    lider,
     historia,
     response: {
       ok: true,
@@ -615,6 +684,8 @@ function processInbox(wpisy, existing, handlowcyRows, cfg, now) {
     out.historia.push(...r.historia);
     out.emaile.push(r.email);
     if (r.whatsapp) out.whatsapp.push(r.whatsapp);
+    if (r.lider && r.lider.email) out.emaile.push(r.lider.email);
+    if (r.lider && r.lider.whatsapp) out.whatsapp.push(r.lider.whatsapp);
     const d = r.response.duplikat;
     const opis = d && d.typ === 'pewny' ? `⚠ ${r.row.lead_id} – ponowienie ${d.lead_id} → ${r.response.przypisano}`
       : `✅ ${r.row.lead_id} → ${r.response.przypisano}${r.row.wojewodztwo ? ` (${r.row.wojewodztwo})` : ''}${d ? ` · możliwy duplikat ${d.lead_id}` : ''}`;
@@ -883,7 +954,8 @@ function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], 
 
 // === Węzeł Code: "Przetwórz lead" (workflow 1 – Przyjęcie leada, tryb: Run Once for All Items) ===
 // Jedno wejście dla: webhooka strony WWW (JSON) i formularza klienta. Dla formularza dokłada stronę z podziękowaniem.
-const cfg = $('Konfiguracja').first().json;
+// Wyjątki z zakładki „Wyjątki” (np. Termex -> biuro); brak zakładki = brak wyjątków
+const cfg = { ...$('Konfiguracja').first().json, WYJATKI: $('Pobierz wyjątki').all().map((i) => i.json).filter((w) => w.dopasowanie) };
 const body = $('Zgłoszenie').first().json || {};
 const existing = $('Pobierz leady').all().map((i) => i.json).filter((r) => r.lead_id);
 const handlowcy = $('Pobierz handlowców').all().map((i) => i.json).filter((r) => r.handlowiec_id);

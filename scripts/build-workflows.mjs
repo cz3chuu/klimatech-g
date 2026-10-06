@@ -18,7 +18,8 @@ const PRZYKLAD = {
   GMAIL_CRED: { id: '', name: 'Gmail account' },
   SUPABASE_CRED: { id: '', name: 'Supabase – klucz secret' }, // credential typu Custom Auth z nagłówkiem apikey
   MAREK_EMAIL: 'marek@klimatech.example',
-  ANIA_EMAIL: 'biuro@klimatech.example',
+  ANIA_EMAIL: 'a.kos@klimatech.example',
+  PROG_LIDER: '50000', // lead powyżej tej wartości = dodatkowe powiadomienie dla Marka (lider sprzedaży)
   TEST_INBOX: 'twoj.mail+klimatech@gmail.com',
   TRYB_TESTOWY: 'true', // true = wszystkie maile i WhatsAppy idą na TEST_INBOX / TEST_WHATSAPP
   N8N_URL: 'http://localhost:5678',
@@ -102,7 +103,7 @@ function build(c) {
         ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
         ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
-        ['SUPABASE_URL', c.SUPABASE_URL], ...extraFields,
+        ['SUPABASE_URL', c.SUPABASE_URL], ['PROG_LIDER', c.PROG_LIDER], ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
@@ -164,6 +165,7 @@ function build(c) {
     konfiguracja([X(2), 0]),
     getRows('Pobierz handlowców', [X(3), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(4), 0], 'Leady'),
+    getRows('Pobierz wyjątki', [X(4), 160], 'Wyjątki', { onError: 'continueRegularOutput' }),
     code('Przetwórz lead', [X(5), 0], dist('1-przyjecie-leada.js')),
     ifTrue('Nowy i poprawny?', [X(6), 0], '={{ $json.valid && !$json.powtorka }}'),
     code('Wiersz do zapisu', [X(7), -120], `return [{ json: ${PL}.row }];`),
@@ -174,23 +176,30 @@ function build(c) {
     gmail('Wyślij mail', [X(12), -240], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true }),
     ifOnce('WhatsApp?', [X(13), -120], `={{ !!${PL}.whatsapp }}`),
     waSend('Wyślij WhatsApp', [X(14), -240], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
+    // Lead powyżej progu: informacja dla Marka jako lidera sprzedaży (lead zostaje u handlowca)
+    ifOnce('Lider?', [X(15), -120], `={{ !!${PL}.lider }}`),
+    gmail('Mail do lidera', [X(16), -240], `={{ ${PL}.lider.email ? ${PL}.lider.email.to : '' }}`, `={{ ${PL}.lider.email ? ${PL}.lider.email.subject : '' }}`, `={{ ${PL}.lider.email ? ${PL}.lider.email.html : '' }}`, { executeOnce: true }),
+    waSend('WhatsApp do lidera', [X(17), -240], `${PL}.lider.whatsapp.chatId`, `${PL}.lider.whatsapp.message`, { executeOnce: true }),
     // Odpowiedź: formularze -> strona wyniku; webhook -> JSON (200 / 400)
-    ifOnce('Z formularza?', [X(15), 0], `={{ ${PL}.wejscie !== 'webhook' }}`),
-    node('Strona wyniku', 'n8n-nodes-base.form', 1, [X(16), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
+    ifOnce('Z formularza?', [X(18), 0], `={{ ${PL}.wejscie !== 'webhook' }}`),
+    node('Strona wyniku', 'n8n-nodes-base.form', 1, [X(19), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
     // n8n nie pozwala na „Respond to Webhook” obok formularza n8n -> webhook odsyła wynik ostatniego węzła (ten JSON).
     // Kod HTTP zawsze 200; o powodzeniu mówi pole ok (true/false) i lista errors.
-    code('Odpowiedź JSON', [X(16), 100], `return [{ json: ${PL}.response }];`),
+    code('Odpowiedź JSON', [X(19), 100], `return [{ json: ${PL}.response }];`),
   ], {
     'Webhook strony WWW': { main: [[to('Zgłoszenie')]] },
     'Formularz klienta': { main: [[to('Zgłoszenie')]] },
-    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Przetwórz lead', 'Nowy i poprawny?'),
+    ...chain('Zgłoszenie', 'Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz wyjątki', 'Przetwórz lead', 'Nowy i poprawny?'),
     // błąd walidacji albo powtórne wysłanie: nic nie zapisujemy, od razu odpowiedź
     'Nowy i poprawny?': { main: [[to('Wiersz do zapisu')], [to('Z formularza?')]] },
     ...chain('Wiersz do zapisu', 'Zapisz lead', 'Historia', 'Zapisz historię', 'Mail?'),
     'Mail?': { main: [[to('Wyślij mail')], [to('WhatsApp?')]] },
     'Wyślij mail': { main: [[to('WhatsApp?')]] },
-    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Z formularza?')]] },
-    'Wyślij WhatsApp': { main: [[to('Z formularza?')]] },
+    'WhatsApp?': { main: [[to('Wyślij WhatsApp')], [to('Lider?')]] },
+    'Wyślij WhatsApp': { main: [[to('Lider?')]] },
+    'Lider?': { main: [[to('Mail do lidera')], [to('Z formularza?')]] },
+    'Mail do lidera': { main: [[to('WhatsApp do lidera')]] },
+    'WhatsApp do lidera': { main: [[to('Z formularza?')]] },
     'Z formularza?': { main: [[to('Strona wyniku')], [to('Odpowiedź JSON')]] },
   });
 
@@ -205,6 +214,7 @@ function build(c) {
     getRows('Pobierz handlowców', [X(2), 0], 'Handlowcy'),
     getRows('Pobierz leady', [X(3), 0], 'Leady'),
     getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead', { onError: 'continueRegularOutput' }), // brak zakładki nie zatrzymuje SLA
+    getRows('Pobierz wyjątki', [X(4), 160], 'Wyjątki', { onError: 'continueRegularOutput' }),
     waGet('Pobierz wiadomości', [X(5), 0], 'lastIncomingMessages'),
     waGet('Pobierz wysłane', [X(6), 0], 'lastOutgoingMessages'),
     code('Obsłuż', [X(7), 0], dist('2-obsluga-co-minute.js')),
@@ -218,7 +228,7 @@ function build(c) {
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wyjątki', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
     'Obsłuż': { main: [[to('Nowe leady'), to('Zmiany leadów'), to('Wpisy historii'), to('Wyniki skrzynki'), to('Maile'), to('WhatsAppy')]] },
     'Nowe leady': { main: [[to('Zapisz nowe leady')]] },
     'Zmiany leadów': { main: [[to('Aktualizuj leady')]] },

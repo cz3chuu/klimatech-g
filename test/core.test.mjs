@@ -8,11 +8,12 @@ const require = createRequire(import.meta.url);
 const core = require('../n8n/src/core.js');
 
 const leady = parseCsv(readFileSync('data/klimatech-leady.csv', 'utf8'));
-const handlowcy = parseCsv(readFileSync('data/klimatech-handlowcy.csv', 'utf8'));
+const handlowcy = parseCsv(readFileSync('data/handlowcy.csv', 'utf8')); // aktualne przypisania (wspólne regiony)
+const wyjatki = parseCsv(readFileSync('data/wyjatki.csv', 'utf8'));
 const NOW = '2026-10-04 23:59';
-const { rows } = importLeads(leady, handlowcy, NOW);
+const { rows } = importLeads(leady, handlowcy, NOW, wyjatki);
 const byId = Object.fromEntries(rows.map((r) => [r.lead_id, r]));
-const cfg = { MAREK_EMAIL: 'marek@klimatech.example', ANIA_EMAIL: 'biuro@klimatech.example', TEST_INBOX: 'test@example.com', TRYB_TESTOWY: 'false', STATUS_URL: 'https://n8n.example/webhook/status' };
+const cfg = { WYJATKI: wyjatki, MAREK_EMAIL: 'marek@klimatech.example', ANIA_EMAIL: 'a.kos@klimatech.example', TEST_INBOX: 'test@example.com', TRYB_TESTOWY: 'false', STATUS_URL: 'https://n8n.example/webhook/status' };
 
 // --- normalizacja ---
 test('telefon: wszystkie formaty z arkusza -> +48XXXXXXXXX', () => {
@@ -34,9 +35,43 @@ test('wykrywa wszystkie 3 pary duplikatów z eksportu', () => {
 test('duplikat zostaje u opiekuna oryginału', () => {
   assert.equal(byId['L-023'].handlowiec_id, byId['L-007'].handlowiec_id);
 });
-test('podlaskie i lubuskie -> bez opiekuna (7 leadów)', () => {
-  const b = rows.filter((r) => r.routing === 'bez_opiekuna').map((r) => r.lead_id);
-  assert.deepEqual(b, ['L-003', 'L-009', 'L-013', 'L-020', 'L-026', 'L-033', 'L-036']);
+test('lubuskie i podlaskie -> regiony wspólne po równo, nikt bez opiekuna', () => {
+  assert.equal(rows.filter((r) => r.routing === 'bez_opiekuna').length, 0);
+  const ile = (woj, id) => rows.filter((r) => r.wojewodztwo === woj && r.duplikat_typ !== 'pewny' && r.handlowiec_id === id).length;
+  assert.equal(ile('podlaskie', 'H1'), 2); // Tomasz Wrona
+  assert.equal(ile('podlaskie', 'H2'), 2); // Katarzyna Lis
+  assert.ok(Math.abs(ile('lubuskie', 'H4') - ile('lubuskie', 'H6')) <= 1); // Bartosz / Michał: 3 leady -> 2:1
+});
+test('region wspólny: kolejny lead dostaje ten, kto ma mniej; przy remisie losowo (oba warianty możliwe)', () => {
+  const lub = (id, i) => ({ lead_id: 'X-' + i, wojewodztwo: 'lubuskie', handlowiec_id: id, duplikat_typ: '' });
+  const r = core.processInquiry({ firma: 'Gorzów Nowy', telefon: '700 000 111', wojewodztwo: 'lubuskie' }, [...rows, lub('H4', 1), lub('H4', 2), lub('H4', 3)], handlowcy, cfg, '2026-10-05 09:00');
+  assert.equal(r.row.handlowiec_id, 'H6'); // Michał ma mniej
+  assert.match(r.historia.find((h) => h.zdarzenie === 'przypisano').szczegoly, /region wspólny/);
+  const wyniki = new Set();
+  for (let i = 0; i < 40; i++) wyniki.add(core.processInquiry({ firma: 'Remis', telefon: '700 000 112', wojewodztwo: 'podlaskie' }, rows, handlowcy, cfg, '2026-10-05 09:00').row.handlowiec_id);
+  assert.deepEqual([...wyniki].sort(), ['H1', 'H2']); // 2:2 w podlaskim -> los
+});
+test('wyjątek: Termex z Płocka zawsze do biura (Ani), przed duplikatem i regionem', () => {
+  assert.equal(byId['L-031'].routing, 'wyjatek');
+  assert.equal(byId['L-031'].handlowiec_id, 'ANIA');
+  assert.equal(byId['L-038'].handlowiec_id, 'ANIA'); // ponowienie też u Ani
+  const r = core.processInquiry({ firma: 'Termex Sp. j.', telefon: '700 555 999', miasto: 'Płock', wojewodztwo: 'mazowieckie' }, rows, handlowcy, cfg, '2026-10-05 09:00');
+  assert.equal(r.email.to, 'a.kos@klimatech.example');
+  assert.match(r.email.subject, /^Lead z wyjątku/);
+  // inny Termex (inne miasto) – zwykły przydział po regionie
+  assert.equal(core.processInquiry({ firma: 'Termex', telefon: '700 555 998', miasto: 'Kraków', wojewodztwo: 'małopolskie' }, rows, handlowcy, cfg, '2026-10-05 09:00').row.handlowiec_id, 'H2');
+});
+test('lead powyżej 50 tys.: dodatkowe powiadomienie dla Marka, lead zostaje u handlowca', () => {
+  const duzy = core.processInquiry({ firma: 'Duża Inwestycja', telefon: '700 222 111', wojewodztwo: 'pomorskie', szac_wartosc_pln: 60000 }, rows, handlowcy, cfgWa, '2026-10-05 09:00');
+  assert.equal(duzy.row.handlowiec_id, 'H5');
+  assert.match(duzy.lider.email.subject, /\[TEST → marek@klimatech\.example\] 💰 Duży lead 60\s000 zł: Duża Inwestycja → Ewa Sowa/);
+  assert.match(duzy.lider.whatsapp.message, /DUŻY LEAD[\s\S]*Opiekun: \*Ewa Sowa\*/);
+  assert.ok(duzy.historia.some((h) => /lider sprzedaży/.test(h.szczegoly)));
+  assert.equal(core.processInquiry({ firma: 'Równo 50', telefon: '700 222 112', wojewodztwo: 'pomorskie', szac_wartosc_pln: 50000 }, rows, handlowcy, cfgWa, 'x').lider, null); // „powyżej”
+  assert.equal(core.processInquiry({ firma: 'Mała', telefon: '700 222 113', wojewodztwo: 'pomorskie', szac_wartosc_pln: 9000 }, rows, handlowcy, cfgWa, 'x').lider, null);
+  // skrzynka biura: powiadomienie lidera też wychodzi
+  const sk = core.processInbox([{ row_number: 2, firma: 'Duży z telefonu', telefon: '700 222 114', wojewodztwo: 'śląskie', szac_wartosc_pln: '75000' }], rows, handlowcy, cfgWa, '2026-10-05 09:00');
+  assert.ok(sk.emaile.some((e) => /Duży lead/.test(e.subject)));
 });
 test('L-027 bez województwa -> świętokrzyskie z miasta -> Katarzyna Lis', () => {
   assert.equal(byId['L-027'].wojewodztwo, 'świętokrzyskie');
@@ -73,10 +108,11 @@ test('A: znany klient po kontakcie -> info o poprzedniej rozmowie', () => {
   assert.match(r.email.subject, /Znany klient/);
   assert.match(r.email.html, /innej ceny/);
 });
-test('A: podlaskie -> mail do Marka', () => {
+test('A: podlaskie -> handlowiec z regionu wspólnego, nie Marek', () => {
   const r = core.processInquiry({ firma: 'Nowa Firma Białystok', telefon: '700 100 200', wojewodztwo: 'podlaskie' }, rows, handlowcy, cfg, '2026-10-05 09:00');
-  assert.equal(r.row.routing, 'bez_opiekuna');
-  assert.equal(r.email.to, cfg.MAREK_EMAIL);
+  assert.equal(r.row.routing, 'handlowiec');
+  assert.ok(['H1', 'H2'].includes(r.row.handlowiec_id));
+  assert.notEqual(r.email.to, cfg.MAREK_EMAIL);
   assert.equal(r.row.lead_id, 'L-041');
 });
 test('A: walidacja i tryb testowy', () => {
@@ -117,7 +153,7 @@ test('n8n/dist: węzeł "Przetwórz lead" uruchamia się z mockiem $', () => {
     'Pobierz leady': rows,
     'Pobierz handlowców': handlowcy,
   };
-  const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+  const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
   const out = new Function('$', code)($);
   assert.equal(out[0].json.valid, true);
   assert.equal(out[0].json.row.handlowiec_id, 'H5');
@@ -215,7 +251,7 @@ test('n8n/dist: "Przygotuj dane" (E) – paczki dla Supabase bez tokenu, z klien
   const code = readFileSync('n8n/dist/4-synchronizacja-crm.js', 'utf8');
   const { historia } = importLeads(leady, handlowcy, NOW);
   const nodes = { 'Pobierz handlowców': handlowcy, 'Pobierz leady': rows, 'Pobierz historię': [...historia, historia[0]] };
-  const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+  const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
   const out = new Function('$', code)($).map((i) => i.json);
   assert.deepEqual(out.map((p) => p.tabela), ['handlowcy', 'leady', 'historia']);
   const l = Object.fromEntries(out[1].rows.map((r) => [r.lead_id, r]));
@@ -258,9 +294,9 @@ test('n8n/dist: "Obsłuż" (obsługa co minutę) – skrzynka, odpowiedź WhatsA
   const odp = { ...msg('1 wysłałem cennik', '🆔 L-005'), idMessage: 'W1' };
   const nodes = {
     Konfiguracja: [{ ...cfgWa, TERAZ: '2026-10-05 10:00' }], 'Pobierz skrzynkę': wpisy, 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy,
-    'Pobierz wiadomości': [odp, odp], 'Pobierz wysłane': [{ error: 'brak' }],
+    'Pobierz wiadomości': [odp, odp], 'Pobierz wysłane': [{ error: 'brak' }], 'Pobierz wyjątki': wyjatki,
   };
-  const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+  const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
   const pamiec = {};
   const out = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' })[0].json;
   assert.deepEqual(out.wyniki.map((w) => w.wynik.slice(0, 1)), ['✅', '⚠', '❌']);
@@ -314,11 +350,11 @@ test('Raport: każdy handlowiec dostaje swoje, Marek po SLA i regiony bez handlo
   const r = core.morningReport(rows, handlowcy, cfgWa, '2026-10-05 08:00');
   const tematy = r.emaile.map((e) => e.subject);
   assert.equal(r.emaile.length, r.whatsapp.length);
-  assert.ok(tematy.some((t) => /\[TEST → marek@klimatech\.example\] Poranny raport: \d+ leadów po SLA lub bez handlowca/.test(t)));
-  assert.ok(tematy.some((t) => /t\.wrona@klimatech\.example\] Poranny raport: 4 otwarte leady do telefonu/.test(t)));
-  assert.ok(tematy.some((t) => /m\.kruk@klimatech\.example\] Poranny raport: 1 otwarty lead do telefonu/.test(t)));
+  assert.ok(tematy.some((t) => /\[TEST → marek@klimatech\.example\] Poranny raport: \d+ lead(y|ów)? po SLA lub bez handlowca/.test(t)));
+  assert.ok(tematy.some((t) => /t\.wrona@klimatech\.example\] Poranny raport: 5 otwartych leadów do telefonu/.test(t)));
+  assert.ok(tematy.some((t) => /a\.kos@klimatech\.example\] Poranny raport: 1 otwarty lead do telefonu/.test(t)));
   const marek = r.emaile.find((e) => /marek@/.test(e.subject)).html;
-  assert.match(marek, /Zielona Energia Gorzów/); // lubuskie – bez handlowca
+  assert.match(marek, /Zielona Energia Gorzów/); // lubuskie – teraz u handlowca, ale po SLA, więc też u Marka
   assert.match(marek, /Instal-Tech Kowalczyk/); // lead Tomasza po SLA też u Marka
   assert.match(r.whatsapp[0].message, /☀️/);
   // lead zamknięty rano znika z raportu
@@ -329,7 +365,7 @@ test('n8n/dist: raport raz dziennie (pamięć daty), poza godzinami pracy brak, 
   const code = readFileSync('n8n/dist/2-obsluga-co-minute.js', 'utf8');
   const uruchom = (cfgX, pamiec) => {
     const nodes = { Konfiguracja: [cfgX], 'Pobierz skrzynkę': [], 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy, 'Pobierz wiadomości': [], 'Pobierz wysłane': [] };
-    const $ = (n) => ({ all: () => nodes[n].map((json) => ({ json })), first: () => ({ json: nodes[n][0] }) });
+    const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
     const out = new Function('$', '$getWorkflowStaticData', '$execution', code)($, () => pamiec, { mode: 'trigger' });
     return out.length ? out[0].json : null;
   };
