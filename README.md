@@ -18,7 +18,7 @@ Ten plik jest dla osoby z zespołu, która ma przejąć projekt albo pomóc przy
 
 | Potrzeba | Rozwiązanie w makiecie |
 |---|---|
-| Lead do opiekuna regionu | przydział po województwie; brak województwa → ustalane z miasta; region bez handlowca → Marek |
+| Lead do opiekuna regionu | przydział po województwie; brak województwa → ustalane z miasta; **regiony wspólne** (lubuskie: Bartosz/Michał, podlaskie: Tomasz/Kasia) dzielone po równo; **wyjątki** (Termex z Płocka → biuro); lead **> 50 tys.** = dodatkowe powiadomienie dla Marka jako lidera sprzedaży |
 | Telefony wpisywane po swojemu, te same firmy dwa razy | normalizacja telefonu (`+48XXXXXXXXX`), klucz nazwy firmy, wykrywanie duplikatów: **pewny** (telefon / e-mail) i **możliwy** (nazwa / domena) |
 | Klient pisze drugi raz | powiadomienie „⚠ PONOWIENIE – klient czeka”, ten sam opiekun |
 | Dwie osoby dzwonią i podają różne ceny | po rozmowie handlowiec odpisuje na WhatsAppie `1 + notatka`; przy kolejnym zgłoszeniu tego klienta powiadomienie pokazuje **kto rozmawiał, kiedy i co ustalił** |
@@ -71,7 +71,7 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 3. **Walidacja.** Wymagana firma lub osoba oraz poprawny telefon (9 cyfr, dowolny format) lub e-mail. Błąd → klient widzi „Sprawdź dane w formularzu”, nic nie jest zapisywane.
 4. **Powtórka?** Ten sam telefon z tego samego źródła w ciągu 30 min = podwójne kliknięcie. Nie zapisujemy drugi raz, klient widzi „To zgłoszenie już do nas dotarło”.
 5. **Duplikat?** Szukamy w arkuszu: ten sam telefon / e-mail → *pewny* (lead zostaje u opiekuna oryginału), ta sama nazwa firmy / domena → *możliwy* (do potwierdzenia przez biuro, kopia do Ani).
-6. **Przydział.** Województwo z formularza, a gdy brak – z miasta. Województwo → handlowiec z zakładki *Handlowcy*. Bez handlowca → Marek. Nieustalone → Ania.
+6. **Przydział.** Kolejność: **wyjątek** z zakładki *Wyjątki* (np. Termex z Płocka → Ania) → **pewny duplikat** (opiekun oryginału) → **województwo** (z formularza albo z miasta) → handlowiec z zakładki *Handlowcy*. Województwo wpisane u dwóch osób to **region wspólny**: lead dostaje ta, która ma w nim mniej leadów, przy remisie losowo. Nieustalone województwo → Ania. Lead powyżej `PROG_LIDER` (50 000 zł) → dodatkowo mail i WhatsApp „💰 Duży lead” do Marka, lead zostaje u handlowca.
 7. **Zapis.** Nowy wiersz w *Leady* (z `lead_id`, `token` do linków, `sla_poziom = 0`) i wpisy w *Historia* (`utworzono`, `przypisano`, `powiadomienie`, kto, skąd, zgoda RODO).
 8. **Powiadomienie.** WhatsApp do opiekuna (krótko: firma, telefon do kliknięcia, wartość, wiadomość, `🆔 L-041`, instrukcja odpowiedzi) + mail z przyciskami statusu. W trybie testowym wszystko idzie na numer i skrzynkę testową, a prawdziwy adresat jest w nagłówku `[TEST → Ewa Sowa]`.
 9. **Kontakt.** Handlowiec dzwoni i odpowiada na wiadomość: `1` dodzwoniłem się · `2` nie odebrał · `3` umówione · `4` niezainteresowany, opcjonalnie z notatką (`1 chce ofertę na 10 szt.`). Workflow 2 co minutę pobiera wiadomości, rozpoznaje leada po `🆔` z cytowanej wiadomości, zapisuje status, `pierwszy_kontakt`, notatkę i odsyła „✅ Zapisano”. „Nie odebrał” nie zatrzymuje zegara SLA.
@@ -90,6 +90,9 @@ Zgodnie z ustaleniem z PM integracje są „working dummy” na darmowych kontac
 | Start zegara | zgłoszenie po 16:00 lub w weekend → najbliższy dzień roboczy 8:00 | `slaStart` |
 | Statusy zamykające SLA | `dodzwoniono`, `umowione`, `niezainteresowany` | `STATUSY_ZAMYKAJACE_SLA` |
 | Duplikat pewny / możliwy | telefon, e-mail / nazwa firmy, firmowa domena | `findDuplicate` |
+| Region wspólny | to samo województwo u dwóch handlowców → mniej leadów z regionu wygrywa, remis = los | `route` |
+| Wyjątki | zakładka *Wyjątki*: `dopasowanie` (firma / telefon / email / domena), `wartosc`, `miasto` (opcjonalnie), `przypisz_do` (ANIA / MAREK / H1…), `opis`; pierwszeństwo przed duplikatem i regionem | `findWyjatek` |
+| Lider sprzedaży | lead > `PROG_LIDER` (domyślnie 50 000 zł) → dodatkowe powiadomienie dla Marka | `processInquiry` |
 | Powtórne wysłanie | ten sam telefon, to samo źródło, ≤ 30 min | `powtorneWyslanie` |
 | Województwo z miasta | krótka lista miast (docelowo kod pocztowy / TERYT) | `MIASTA` |
 | Odpowiedź WhatsApp | cyfra 1–4 lub słowa („dodzwoniłem”, „nie odebrał”…), lead z cytatu `🆔` lub `L-041 1` | `parseWaReply` |
@@ -114,7 +117,9 @@ scripts/import-csv.mjs          eksport arkusza Ani -> pliki do importu + docs/r
 scripts/serve-crm.mjs           lokalny serwer strony CRM (+ tryb podglądu /?demo)
 crm/index.html                  mini CRM (jeden plik, supabase-js z CDN)
 supabase/schema.sql             tabele, indeksy, RLS (odczyt tylko po zalogowaniu)
-data/klimatech-*.csv            załączniki od klienta (eksport arkusza, handlowcy)
+data/klimatech-*.csv            załączniki od klienta (eksport arkusza, handlowcy – oryginał)
+data/handlowcy.csv              aktualne przypisania województw (regiony wspólne) – do zakładki Handlowcy
+data/wyjatki.csv                reguły wyjątków (Termex -> biuro) – do zakładki Wyjątki
 data/leady-import.csv …         wynik importu do zakładek Leady / Historia
 data/wpisz-lead-szablon.csv     zakładka „Wpisz lead” z 3 przykładowymi wierszami
 test/core.test.mjs              35 testów (node:test, bez zależności)
@@ -131,16 +136,17 @@ Wymagania: Node.js 20+, n8n (testowane na 1.116 w Dockerze, strefa `Europe/Warsa
 
 ```bash
 npm test                    # 35 testów rdzenia na danych z załącznika
-npm run import              # (opcjonalnie) ponowne wygenerowanie data/*-import.csv i docs/raport.md
+npm run import              # (opcjonalnie) przeliczenie historii według aktualnych reguł -> data/*-import.csv (z --raport także docs/raport.md)
 ```
 
 ### 7.1 Arkusz Google
-Nowy arkusz z zakładkami **dokładnie**: `Leady`, `Handlowcy`, `Historia`, `Wpisz lead`. Do każdej: *Plik → Importuj → Prześlij → Zastąp bieżący arkusz*, **odznacz „Konwertuj tekst na liczby, daty i formuły”** (inaczej `+48…` i daty się zepsują):
+Nowy arkusz z zakładkami **dokładnie**: `Leady`, `Handlowcy`, `Historia`, `Wpisz lead`, `Wyjątki`. Do każdej: *Plik → Importuj → Prześlij → Zastąp bieżący arkusz*, **odznacz „Konwertuj tekst na liczby, daty i formuły”** (inaczej `+48…` i daty się zepsują):
 
 | Zakładka | Plik |
 |---|---|
 | Leady | `data/leady-import.csv` |
-| Handlowcy | `data/klimatech-handlowcy.csv` (opcjonalna kolumna `whatsapp` z numerami handlowców) |
+| Handlowcy | `data/handlowcy.csv` (aktualne regiony; opcjonalna kolumna `whatsapp` z numerami handlowców) |
+| Wyjątki | `data/wyjatki.csv` |
 | Historia | `data/historia-import.csv` |
 | Wpisz lead | `data/wpisz-lead-szablon.csv` |
 
@@ -180,7 +186,9 @@ Darmowa instancja *Developer* na console.green-api.com, zeskanowany QR telefonem
 | Podwójne wysłanie | ten sam formularz drugi raz w ciągu 30 min | „To zgłoszenie już do nas dotarło”, brak drugiego leada i powiadomienia |
 | Ponowienie | telefon `607-210-530` (Instal-Tech z eksportu) | duplikat pewny `L-007`, „⚠ PONOWIENIE”, opiekun Tomasz Wrona |
 | Znany klient | telefon `+48604777321` (Ekoterm, był kontakt) | „♻️ ZNANY KLIENT”, kto rozmawiał i ostatnia notatka |
-| Region bez handlowca | miasto Zielona Góra, bez województwa | lubuskie z miasta → Marek |
+| Region wspólny | miasto Gorzów Wielkopolski, bez województwa | lubuskie z miasta → ten z pary Bartosz / Michał, kto ma mniej leadów z lubuskiego |
+| Wyjątek | firma `Termex`, miasto Płock | „Lead z wyjątku” → Ania (`a.kos@klimatech.example`) |
+| Duży lead | wartość 60 000 zł | zwykłe powiadomienie do handlowca + „💰 Duży lead” do Marka |
 | Webhook strony | `POST /webhook/lead` z JSON (pola jak w arkuszu) | JSON `{ ok, lead_id, routing, przypisano, duplikat, sla_start }` |
 | Wpis biura | wiersz w „Wpisz lead” | po ≤ 1 min kolumna `wynik`: `✅ L-0xx → …` / `⚠ ponowienie` / `❌ popraw` |
 | Kontakt z WhatsAppa | odpowiedz na wiadomość z leadem: `1 wysłałem cennik` | po ≤ 1 min „✅ Zapisano…📝”, w arkuszu status, `pierwszy_kontakt`, notatka |
