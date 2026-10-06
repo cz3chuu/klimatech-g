@@ -810,6 +810,57 @@ function processInbox(wpisy, existing, handlowcyRows, cfg, now) {
   return out;
 }
 
+// ---------------- Mail z formularza strony (Contact Form 7 -> leady@) ----------------
+// Formularz na stronie wysyła drugi mail na skrzynkę leadów. Treść w stałym układzie „Etykieta: wartość”
+// (szablon dla agencji: docs/dla-agencji-formularz.md). Workflow 2 co minutę czyta nowe maile z tej skrzynki.
+const MAIL_POLA = {
+  'firma': 'firma', 'imię i nazwisko': 'osoba', 'osoba': 'osoba', 'telefon': 'telefon', 'e-mail': 'email', 'email': 'email',
+  'miasto': 'miasto', 'województwo': 'wojewodztwo', 'zainteresowanie': 'zainteresowanie', 'kim jesteś': 'kim',
+  'wartość': 'szac_wartosc_pln', 'orientacyjna wartość': 'szac_wartosc_pln', 'zgoda': 'zgoda', 'wiadomość': 'wiadomosc',
+};
+function zMailaFormularza(tekst) {
+  const out = {};
+  let pole = null;
+  for (const linia of String(tekst || '').replace(/\r/g, '').split('\n')) {
+    if (/^\s*--\s*$/.test(linia)) break; // stopka CF7 („-- Ta wiadomość została wysłana z formularza…”)
+    const m = linia.match(/^\s*([^:]{2,30}?)\s*:\s*(.*)$/);
+    const klucz = m && MAIL_POLA[m[1].trim().toLowerCase()];
+    if (klucz) { pole = klucz; out[pole] = m[2].trim(); continue; }
+    if (pole === 'wiadomosc' && linia.trim()) out.wiadomosc = (out.wiadomosc ? out.wiadomosc + '\n' : '') + linia.trim();
+  }
+  // brak telefonu w układzie (np. agencja zmieniła szablon) – szukamy numeru w całej treści
+  if (!out.telefon) { const t = String(tekst || '').match(/(?:\+48|0048)?[\s-]?\d{3}[\s-]?\d{3}[\s-]?\d{3}/); if (t) out.telefon = t[0].trim(); }
+  if (['nie wiem', '(nie wiem)', 'województwo'].includes(String(out.wojewodztwo || '').toLowerCase())) delete out.wojewodztwo;
+  if (out.szac_wartosc_pln) out.szac_wartosc_pln = String(out.szac_wartosc_pln).replace(/[^\d]/g, '');
+  if (out.kim) { out.wiadomosc = '[' + out.kim + '] ' + (out.wiadomosc || ''); delete out.kim; }
+  if (out.zgoda !== undefined) out.zgoda = !!out.zgoda && !/^(0|nie|false)$/i.test(out.zgoda);
+  return { ...out, zrodlo: 'formularz', wprowadzil: 'formularz WWW (mail)' };
+}
+// maile: [{ id, tekst, temat, data }] – nowe maile ze skrzynki leadów
+function processMaile(maile, existing, handlowcyRows, cfg, now) {
+  const baza = [...existing];
+  const out = { leady: [], historia: [], emaile: [], whatsapp: [], doAni: [] };
+  for (const m of maile) {
+    const r = processInquiry(zMailaFormularza(m.tekst), baza, handlowcyRows, cfg, now);
+    if (r.powtorka) continue; // ten sam klient wysłał formularz drugi raz w ciągu 30 min
+    if (!r.valid) {
+      // nieczytelny mail nie może zginąć: trafia do Ani z oryginalną treścią (wpisze go ręcznie w „Wpisz lead”)
+      out.doAni.push(wrapTestMode({ to: cfg.ANIA_EMAIL, cc: '', subject: `Do sprawdzenia: mail z formularza (${m.temat || 'bez tematu'})`,
+        html: `<p>Nie udało się automatycznie odczytać zgłoszenia z formularza: ${esc(r.errors.join(' '))}</p><p>Wpisz je ręcznie w zakładce „Wpisz lead”. Treść maila:</p><pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${esc(m.tekst)}</pre>` }, cfg));
+      out.historia.push({ czas: now, lead_id: '', zdarzenie: 'mail_formularz', kto: 'system', szczegoly: `nieczytelny mail z formularza (${r.errors.join(' ')}) – przekazany Ani` });
+      continue;
+    }
+    baza.push(r.row);
+    out.leady.push(r.row);
+    out.historia.push(...r.historia);
+    out.emaile.push(r.email);
+    if (r.whatsapp) out.whatsapp.push(r.whatsapp);
+    if (r.lider && r.lider.email) out.emaile.push(r.lider.email);
+    if (r.lider && r.lider.whatsapp) out.whatsapp.push(r.lider.whatsapp);
+  }
+  return out;
+}
+
 // Strona dla klienta po wysłaniu formularza ze strony (workflow H). Pokazuje numer, na który oddzwonimy –
 // klient sam wyłapie literówkę. Po godzinach pracy mówi uczciwie, kiedy zadzwonimy.
 function klientPage(wynik, formUrl) {
@@ -1200,21 +1251,29 @@ function zestawieniaPoranne(rows, historia, handlowcyRows, cfg, now) {
 }
 
 // ---------------- Obsługa co minutę (workflow „Obsługa co minutę”) ----------------
-// Jeden przebieg, jeden stan: skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
+// Jeden przebieg, jeden stan: maile z formularza -> skrzynka „Wpisz lead” -> odpowiedzi z WhatsAppa -> SLA (co 15 min).
 // Kolejne kroki widzą zmiany poprzednich (np. lead ze skrzynki potwierdzony w tej samej minucie).
 const SLA_HISTORIA = { 1: 'przypomnienie 4h', 2: 'po terminie doby roboczej – w porannym zestawieniu', 3: 'eskalacja (2 dni robocze) – w porannym zestawieniu Marka' };
-function processCycle({ wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false, raport = false }) {
+function processCycle({ maile = [], wpisy = [], wiadomosci = [], rows = [], handlowcy = [], cfg, now, sla = false, raport = false }) {
   const out = { nowe_leady: [], aktualizacje: [], historia: [], emaile: [], whatsapp: [], wyniki: [] };
   const mail = String(cfg.KANAL || 'mail') !== 'whatsapp';
 
+  // 0. Maile z formularza strony (skrzynka leadów)
+  const zMaili = processMaile(maile, rows, handlowcy, cfg, now);
+  out.nowe_leady.push(...zMaili.leady);
+  out.historia.push(...zMaili.historia);
+  if (mail) out.emaile.push(...zMaili.emaile);
+  out.emaile.push(...zMaili.doAni); // nieczytelny mail z formularza – zawsze mailem do Ani
+  out.whatsapp.push(...zMaili.whatsapp);
+
   // 1. Skrzynka „Wpisz lead”
-  const inbox = processInbox(wpisy, rows, handlowcy, cfg, now);
+  const inbox = processInbox(wpisy, [...rows, ...zMaili.leady], handlowcy, cfg, now);
   out.nowe_leady.push(...inbox.leady);
   out.historia.push(...inbox.historia);
   out.wyniki.push(...inbox.wyniki);
   if (mail) out.emaile.push(...inbox.emaile);
   out.whatsapp.push(...inbox.whatsapp);
-  let stan = [...rows, ...inbox.leady];
+  let stan = [...rows, ...zMaili.leady, ...inbox.leady];
 
   // 2. Odpowiedzi handlowców z WhatsAppa
   const zmiany = {};

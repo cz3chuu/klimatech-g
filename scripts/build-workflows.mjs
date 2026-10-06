@@ -21,6 +21,7 @@ const PRZYKLAD = {
   ANIA_EMAIL: 'a.kos@klimatech.example',
   PROG_LIDER: '50000', // lead powyżej tej wartości = dodatkowe powiadomienie dla Marka (lider sprzedaży)
   TEST_INBOX: 'twoj.mail+klimatech@gmail.com',
+  MAIL_FORMULARZ: 'leady@klimatech.pl', // skrzynka, na którą formularz strony (CF7) wysyła kopię zgłoszenia; w makiecie np. twoj.mail+leady@gmail.com
   TRYB_TESTOWY: 'true', // true = wszystkie maile i WhatsAppy idą na TEST_INBOX / TEST_WHATSAPP
   N8N_URL: 'http://localhost:5678',
   KANAL: 'oba', // mail | whatsapp | oba
@@ -105,7 +106,7 @@ function build(c) {
     includeOtherFields: false,
     assignments: {
       assignments: [
-        ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX], ['TRYB_TESTOWY', c.TRYB_TESTOWY],
+        ['MAREK_EMAIL', c.MAREK_EMAIL], ['ANIA_EMAIL', c.ANIA_EMAIL], ['TEST_INBOX', c.TEST_INBOX], ['MAIL_FORMULARZ', c.MAIL_FORMULARZ || ''], ['TRYB_TESTOWY', c.TRYB_TESTOWY],
         ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
         ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
@@ -240,6 +241,11 @@ function build(c) {
     getRows('Pobierz skrzynkę', [X(4), 0], 'Wpisz lead', { onError: 'continueRegularOutput' }), // brak zakładki nie zatrzymuje SLA
     getRows('Pobierz wyjątki', [X(4), 160], 'Wyjątki', { onError: 'continueRegularOutput' }),
     getRows('Pobierz nieobecności', [X(4), 320], 'Nieobecności', { onError: 'continueRegularOutput' }),
+    // Maile z formularza strony: Contact Form 7 wysyła kopię zgłoszenia na MAIL_FORMULARZ (szablon: docs/dla-agencji-formularz.md)
+    node('Pobierz maile z formularza', 'n8n-nodes-base.gmail', 2.1, [X(4), 480], {
+      resource: 'message', operation: 'getAll', returnAll: false, limit: 50, simple: false,
+      filters: { q: `={{ ${K('MAIL_FORMULARZ')} ? 'to:' + ${K('MAIL_FORMULARZ')} + ' newer_than:2d' : 'label:brak-skrzynki-leadow' }}` }, options: {},
+    }, { credentials: gmailCred, executeOnce: true, alwaysOutputData: true, onError: 'continueRegularOutput' }),
     waGet('Pobierz wiadomości', [X(5), 0], 'lastIncomingMessages'),
     waGet('Pobierz wysłane', [X(6), 0], 'lastOutgoingMessages'),
     code('Obsłuż', [X(7), 0], dist('2-obsluga-co-minute.js')),
@@ -253,7 +259,7 @@ function build(c) {
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
-    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wyjątki', 'Pobierz nieobecności', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
+    ...chain('Konfiguracja', 'Pobierz handlowców', 'Pobierz leady', 'Pobierz skrzynkę', 'Pobierz wyjątki', 'Pobierz nieobecności', 'Pobierz maile z formularza', 'Pobierz wiadomości', 'Pobierz wysłane', 'Obsłuż'),
     'Obsłuż': { main: [[to('Nowe leady'), to('Zmiany leadów'), to('Wpisy historii'), to('Wyniki skrzynki'), to('Maile'), to('WhatsAppy')]] },
     'Nowe leady': { main: [[to('Zapisz nowe leady')]] },
     'Zmiany leadów': { main: [[to('Aktualizuj leady')]] },

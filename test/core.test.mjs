@@ -497,3 +497,63 @@ test('Meta: przypomnienie i zestawienia mają szablony z polami bez nowych linii
   assert.ok(z.osobiste.every((o) => o.whatsapp.meta_body.template.name === 'klimatech_zestawienie'));
   assert.ok([z.marek, ...z.osobiste].every((x) => x.whatsapp.meta_body.template.components[0].parameters.every((p) => !/\n/.test(p.text))));
 });
+
+// --- mail z formularza strony (CF7 -> skrzynka leadów) ---
+const MAIL_CF7 = `Firma: Instal-Kowal
+Imię i nazwisko: Jan Kowal
+Telefon: 601 222 333
+E-mail: jan@instalkowal.pl
+Miasto: Gdańsk
+Województwo: pomorskie
+Zainteresowanie: pompy ciepła, rekuperacja
+Kim jesteś: instalator / firma instalacyjna
+Wartość: 40 000 zł
+Zgoda: Zgadzam się na kontakt
+Wiadomość:
+10 pomp na wiosnę
+dwa budynki
+
+--
+Ta wiadomość została wysłana z formularza kontaktowego na stronie Klimatech`;
+
+test('mail z formularza: pola z układu „Etykieta: wartość”, wiadomość wielowierszowa, bez stopki CF7', () => {
+  const p = core.zMailaFormularza(MAIL_CF7);
+  assert.equal(p.firma, 'Instal-Kowal');
+  assert.equal(p.osoba, 'Jan Kowal');
+  assert.equal(p.telefon, '601 222 333');
+  assert.equal(p.email, 'jan@instalkowal.pl');
+  assert.equal(p.wojewodztwo, 'pomorskie');
+  assert.equal(p.szac_wartosc_pln, '40000');
+  assert.equal(p.zgoda, true);
+  assert.equal(p.wiadomosc, '[instalator / firma instalacyjna] 10 pomp na wiosnę\ndwa budynki');
+  assert.equal(p.zrodlo, 'formularz');
+});
+
+test('mail z formularza: „nie wiem” w województwie = ustal z miasta; telefon znaleziony poza układem', () => {
+  const p = core.zMailaFormularza('Firma: Test\nWojewództwo: nie wiem\nMiasto: Gorzów Wielkopolski\nProszę o kontakt pod nr 700-555-321');
+  assert.equal(p.wojewodztwo, undefined);
+  assert.equal(p.telefon, '700-555-321');
+});
+
+test('maile z formularza: poprawny -> lead u opiekuna regionu; nieczytelny -> mail do Ani, bez leada', () => {
+  const out = core.processMaile([
+    { id: 'm1', tekst: MAIL_CF7, temat: 'Zapytanie ze strony – Instal-Kowal' },
+    { id: 'm2', tekst: 'Dzień dobry, proszę o ofertę.', temat: 'Zapytanie ze strony' },
+  ], rows, handlowcy, { ...cfg, TRYB_TESTOWY: 'true' }, '2026-10-06 10:00');
+  assert.equal(out.leady.length, 1);
+  assert.equal(out.leady[0].wojewodztwo, 'pomorskie');
+  assert.equal(out.leady[0].routing, 'handlowiec');
+  assert.equal(out.doAni.length, 1);
+  assert.match(out.doAni[0].subject, /^\[TEST → a\.kos@klimatech\.example\] Do sprawdzenia: mail z formularza/);
+  assert.equal(out.doAni[0].to, 'test@example.com');
+});
+
+test('obsługa co minutę: lead z maila i ten sam klient w „Wpisz lead” w tej samej minucie = duplikat', () => {
+  const out = core.processCycle({
+    maile: [{ id: 'm1', tekst: MAIL_CF7 }],
+    wpisy: [{ row_number: 2, firma: 'Instal-Kowal', telefon: '601222333', zrodlo: 'telefon' }],
+    rows, handlowcy, cfg, now: '2026-10-06 10:00',
+  });
+  assert.equal(out.nowe_leady.length, 2);
+  assert.equal(out.nowe_leady[1].duplikat_of, out.nowe_leady[0].lead_id);
+});

@@ -9,6 +9,7 @@
   "N8N_URL": "http://localhost:5678",
   "TRYB_TESTOWY": "true",
   "TEST_INBOX": "twoj.mail@gmail.com",
+  "MAIL_FORMULARZ": "skrzynka na kopie zgłoszeń z formularza strony – produkcyjnie leady@klimatech.pl, w makiecie np. twoj.mail+leady@gmail.com",
   "KANAL": "oba",
 
   "GREEN_API_URL": "https://XXXX.api.greenapi.com",
