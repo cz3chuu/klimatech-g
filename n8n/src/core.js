@@ -359,10 +359,51 @@ function waChatId(num) {
   return d ? d + '@c.us' : '';
 }
 function kanalWa(cfg) { return String(cfg.KANAL || 'mail') !== 'mail'; }
+
+// ---------------- WhatsApp Business API (Meta Cloud API) – gotowe do włączenia: WHATSAPP = meta ----------------
+// Meta pozwala wysłać wiadomość z inicjatywy firmy tylko jako ZATWIERDZONY SZABLON (pola {{1}}, {{2}}…, bez nowych linii);
+// zwykły tekst – tylko w ciągu 24 h od wiadomości odbiorcy (np. nasze „✅ Zapisano” po odpowiedzi handlowca).
+// Dlatego każda wiadomość ma też wersję meta_body. Treści szablonów do zgłoszenia w Meta: docs/whatsapp-business-api.md.
+const META_PRZYCISKI = [['dodzwoniono', '✅ Dodzwoniłem się'], ['nie_odebral', '📵 Nie odebrał'], ['umowione', '📅 Umówione'], ['niezainteresowany', '✖ Niezainteresowany']];
+const przyciskiStatusu = (leadId) => META_PRZYCISKI.map(([s]) => `${leadId}|${s}`); // payload wraca w kliknięciu
+function czystyParam(t) {
+  const s = String(t ?? '').replace(/\*/g, '').replace(/[\r\n\t]+/g, ' · ').replace(/ {4,}/g, '   ').trim();
+  return (s || '—').slice(0, 900);
+}
+function metaBody(wa, szablon) {
+  const to = String(wa.chatId || '').replace(/@.*$/, '').replace(/\D/g, '');
+  if (!szablon) return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: String(wa.message || '').slice(0, 4096) } };
+  const components = [{ type: 'body', parameters: szablon.parametry.map((p) => ({ type: 'text', text: czystyParam(p) })) }];
+  (szablon.przyciski || []).forEach((payload, i) => components.push({ type: 'button', sub_type: 'quick_reply', index: String(i), parameters: [{ type: 'payload', payload }] }));
+  return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'template', template: { name: szablon.nazwa, language: { code: 'pl' }, components } };
+}
+function zMeta(wa, cfg, szablon) {
+  return wa && String(cfg.WHATSAPP || 'green') === 'meta' ? { ...wa, meta_body: metaBody(wa, szablon) } : wa;
+}
 function wrapTestModeWa(msg, cfg) {
-  if (String(cfg.TRYB_TESTOWY) !== 'true') return msg.chatId ? msg : null;
-  const chatId = waChatId(cfg.TEST_WHATSAPP);
-  return chatId ? { chatId, message: `[TEST → ${msg.nazwa}]\n${msg.message}` } : null;
+  let wa;
+  if (String(cfg.TRYB_TESTOWY) !== 'true') wa = msg.chatId ? { chatId: msg.chatId, message: msg.message, nazwa: msg.nazwa } : null;
+  else { const chatId = waChatId(cfg.TEST_WHATSAPP); wa = chatId ? { chatId, message: `[TEST → ${msg.nazwa}]\n${msg.message}` } : null; }
+  return zMeta(wa, cfg, msg.szablon);
+}
+// Kliknięcie przycisku „L-041|dodzwoniono” -> „L-041 1” (dalej ta sama obsługa co odpowiedź z Green API)
+function przyciskNaTekst(payload) {
+  const [lead, s] = String(payload || '').split('|');
+  const cyfra = (Object.entries(WA_ODPOWIEDZI).find(([, v]) => v === s) || [])[0];
+  return lead && cyfra ? `${lead} ${cyfra}` : '';
+}
+// Webhook Meta (entry[].changes[].value.messages[]) -> wiadomości w formacie, który rozumie processWaReplies
+function metaDoWiadomosci(payload) {
+  const out = [];
+  for (const e of (payload && payload.entry) || []) for (const ch of e.changes || []) for (const m of ((ch.value || {}).messages) || []) {
+    let tekst = '';
+    if (m.type === 'text') tekst = (m.text || {}).body || '';
+    else if (m.type === 'button') tekst = przyciskNaTekst((m.button || {}).payload) || (m.button || {}).text || '';
+    else if (m.type === 'interactive') { const b = (m.interactive || {}).button_reply || {}; tekst = przyciskNaTekst(b.id) || b.title || ''; }
+    else continue; // zdjęcia, lokalizacje itp. pomijamy
+    out.push({ type: 'incoming', idMessage: m.id, timestamp: Number(m.timestamp) || 0, chatId: waChatId(m.from), textMessage: tekst });
+  }
+  return out;
 }
 function skroc(s, n) { s = String(s ?? '').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
@@ -440,7 +481,7 @@ function processWaReplies(messages, rows, handlowcyRows, cfg, now) {
     // Rozmowy, które nie dotyczą leadów, ignorujemy po cichu
     if (!p.status && !/🆔|L-\d/.test(quoted) && !/\bl-?\s?\d/i.test(text)) continue;
 
-    const reply = (message) => ({ chatId: m.chatId, message });
+    const reply = (message) => zMeta({ chatId: m.chatId, message }, cfg); // odpowiedź w oknie 24 h – zwykły tekst
     const base = { idMessage: m.idMessage, chatId: m.chatId };
     const nadawcaH = handlowcyRows.find((h) => waChatId(h.whatsapp) === m.chatId);
     const marek = waChatId(cfg.MAREK_WHATSAPP) === m.chatId;
@@ -669,7 +710,11 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
 
   const email = wrapTestMode({ to: odbiorca.email, cc: cc.join(','), subject, html }, cfg);
   const whatsapp = kanalWa(cfg)
-    ? wrapTestModeWa({ chatId: waChatId(odbiorca.whatsapp), nazwa: odbiorca.nazwa, message: waLeadMessage(row, waNaglowek, waInfo, target) }, cfg)
+    ? wrapTestModeWa({ chatId: waChatId(odbiorca.whatsapp), nazwa: odbiorca.nazwa, message: waLeadMessage(row, waNaglowek, waInfo, target),
+      szablon: { nazwa: 'klimatech_nowy_lead', przyciski: przyciskiStatusu(target.lead_id), parametry: [
+        waNaglowek, `${row.firma || row.osoba}${row.firma && row.osoba ? ' – ' + row.osoba : ''}`, row.wojewodztwo || 'woj. nieustalone',
+        formatPhone(row.telefon_norm) || row.email || 'brak', `${zl(row.szac_wartosc_pln)} · ${row.zainteresowanie || 'zapytanie'}`,
+        waInfo || skroc(row.wiadomosc, 300) || '—', target.lead_id] } }, cfg)
     : null;
 
   // Lead powyżej progu: informacja dla Marka jako lidera sprzedaży – lead zostaje u handlowca
@@ -683,7 +728,9 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
 <p style="color:#888;font-size:12px">${row.lead_id}${pewny ? ` → dotyczy ${original.lead_id} (ponowienie)` : ''} · zgłoszono ${row.data_zgloszenia}</p></div>`;
     lider = {
       email: String(cfg.KANAL || 'mail') !== 'whatsapp' ? wrapTestMode({ to: m.email, cc: '', subject: lSubject, html: lHtml }, cfg) : null,
-      whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(m.whatsapp), nazwa: m.nazwa, message:
+      whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(m.whatsapp), nazwa: m.nazwa,
+        szablon: { nazwa: 'klimatech_duzy_lead', parametry: [zl(row.szac_wartosc_pln), row.firma || row.osoba, row.wojewodztwo || 'woj. nieustalone', odbiorca.nazwa, target.lead_id] },
+        message:
         `💰 *DUŻY LEAD* · ${zl(row.szac_wartosc_pln)}${pewny ? ' · ponowienie' : ''}
 *${row.firma || row.osoba}* · ${row.wojewodztwo || 'woj. nieustalone'}
 Opiekun: *${odbiorca.nazwa}*
@@ -879,7 +926,9 @@ function groupSlaWhatsapp(items, cfg) {
     const tytul = eskalacja ? `🚨 *ESKALACJA: ${g.items.length} lead(y) bez kontaktu*` : `⏰ *Leady czekają na telefon (${g.items.length})*`;
     const stopka = g.items.length === 1 ? WA_STOPKA
       : `Po rozmowie odpowiedz na tę wiadomość: *numer leada + cyfra*, np. „${g.items[0].wiersz.lead_id} 1”\n1 = dodzwoniłem się · 2 = nie odebrał · 3 = umówione · 4 = niezainteresowany`;
-    return wrapTestModeWa({ chatId: waChatId(g.do.whatsapp), nazwa: g.do.nazwa, message: `${tytul}\n\n${lista}\n────────\n${stopka}` }, cfg);
+    return wrapTestModeWa({ chatId: waChatId(g.do.whatsapp), nazwa: g.do.nazwa, message: `${tytul}\n\n${lista}\n────────\n${stopka}`,
+      szablon: { nazwa: 'klimatech_przypomnienie', parametry: [String(g.items.length),
+        g.items.map((it) => `${it.wiersz.firma || it.wiersz.osoba} (${it.wiersz.lead_id}, ${formatPhone(it.wiersz.telefon_norm) || it.wiersz.email || '—'})`).join(' · ')] } }, cfg);
   }).filter(Boolean);
 }
 
@@ -952,7 +1001,9 @@ ${r.notatka ? `<br><span style="color:#555;font-size:13px">📝 ${esc(r.notatka)
       const naglowek = czyMarek ? `☀️ *Poranny raport – po SLA / bez handlowca: ${g.items.length}* (${suma(g.items)})`
         : `☀️ *Dzień dobry! Otwarte leady: ${g.items.length}* (${suma(g.items)})`;
       const wa = wrapTestModeWa({ chatId: waChatId(g.do.whatsapp), nazwa: g.do.nazwa,
-        message: `${naglowek}\n\n${top}${reszta}\n────────\nPo rozmowie odpowiedz: *numer leada + cyfra*, np. „${g.items[0].wiersz.lead_id} 1”` }, cfg);
+        message: `${naglowek}\n\n${top}${reszta}\n────────\nPo rozmowie odpowiedz: *numer leada + cyfra*, np. „${g.items[0].wiersz.lead_id} 1”`,
+        szablon: { nazwa: 'klimatech_zestawienie', parametry: [g.do.nazwa.split(' ')[0], String(g.items.length), '—', String(g.items.length), '—',
+          g.items.slice(0, 3).map((it) => `${it.wiersz.firma || it.wiersz.osoba} (${it.wiersz.lead_id})`).join(' · ')] } }, cfg);
       if (wa) whatsapp.push(wa);
     }
   });
@@ -1082,7 +1133,9 @@ function zestawienieHandlowca(osoba, d, cfg) {
   return {
     osoba, liczby: { doTelefonuDzis: doTelefonuDzis.length, zalegle: naDzis.length, nowe: nowe.length, otwarte: moje.length, obsluzone: obsl.length },
     email: wrapTestMode({ to: osoba.email, cc: '', subject, html }, cfg),
-    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(osoba.whatsapp), nazwa: osoba.nazwa, message: wa }, cfg) : null,
+    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(osoba.whatsapp), nazwa: osoba.nazwa, message: wa,
+      szablon: { nazwa: 'klimatech_zestawienie', parametry: [imie, String(doTelefonuDzis.length), String(nowe.length), String(moje.length), String(obsl.length),
+        kolejnosc.slice(0, 3).map((it) => `${it.wiersz.firma || it.wiersz.osoba} (${it.wiersz.lead_id}, ${formatPhone(it.wiersz.telefon_norm) || '—'})`).join(' · ') || 'brak'] } }, cfg) : null,
   };
 }
 
@@ -1124,7 +1177,10 @@ ${osoby.map((o) => {
   return {
     liczby: { nowe: d.nowe.length, obsluzone: d.obsluzone.length, wTerminie: proc, otwarte: d.otwarte.length, poTerminie: poTerminie.length, eskalacje: eskalacje.length },
     email: wrapTestMode({ to: marek.email, cc: '', subject, html }, cfg),
-    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(marek.whatsapp), nazwa: marek.nazwa, message: wa }, cfg) : null,
+    whatsapp: kanalWa(cfg) ? wrapTestModeWa({ chatId: waChatId(marek.whatsapp), nazwa: marek.nazwa, message: wa,
+      szablon: { nazwa: 'klimatech_zestawienie_zespolu', parametry: [dataSlownie(d.now), String(d.nowe.length), String(d.obsluzone.length), proc,
+        String(d.otwarte.length), String(poTerminie.length), String(eskalacje.length),
+        eskalacje.slice(0, 3).map((it) => `${it.wiersz.firma || it.wiersz.osoba} – ${it.opiekun.nazwa}`).join(' · ') || 'brak eskalacji'] } }, cfg) : null,
   };
 }
 
@@ -1206,5 +1262,6 @@ if (typeof module !== 'undefined') {
     normalizePhone, normalizeEmail, companyKey, normalizeWojewodztwo, findDuplicate, parseHandlowcy, route,
     buildLeadRow, processInquiry, applyStatusClick, checkSla, groupSlaEmails, makeToken,
     waChatId, parseWaReply, applyStatus, processWaReplies, groupSlaWhatsapp, processInbox, doPrzetworzenia, klientPage, processCycle, morningReport, otwarteLeady, findWyjatek, zestawieniaPoranne, danePoranne, zastepcaDla, nieobecnoscDla, aktywny, recipientFor,
+    metaBody, metaDoWiadomosci, przyciskNaTekst, META_PRZYCISKI,
   };
 }

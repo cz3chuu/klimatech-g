@@ -456,3 +456,44 @@ test('Odejście: po dacie „aktywny do” handlowiec nie dostaje leadów, regio
   assert.equal(dol.row.routing, 'bez_opiekuna'); // dopóki nikt nie dostanie dolnośląskiego – do Marka
   assert.equal(core.processInquiry({ firma: 'Wrocław 2', telefon: '700 555 101', wojewodztwo: 'dolnośląskie' }, rows, hz, cfgWa, '2026-11-30 09:00').row.handlowiec_id, 'H6');
 });
+
+// --- WhatsApp Business API (Meta) – gotowe do włączenia, testy na przykładowych wiadomościach w formacie Meta ---
+const cfgMeta = { ...cfgWa, WHATSAPP: 'meta' };
+const zMety = (messages) => ({ object: 'whatsapp_business_account', entry: [{ id: 'WABA_ID', changes: [{ field: 'messages', value: {
+  messaging_product: 'whatsapp', metadata: { display_phone_number: '48600999999', phone_number_id: 'PHONE_ID' },
+  contacts: [{ profile: { name: 'Ewa' }, wa_id: '48600111222' }], messages } }] }] });
+test('Meta: nowy lead jako szablon klimatech_nowy_lead – 7 pól bez nowych linii, 4 przyciski statusu', () => {
+  const r = core.processInquiry({ firma: 'Nowa', osoba: 'Jan', telefon: '700 300 400', wojewodztwo: 'pomorskie', szac_wartosc_pln: 20000, wiadomosc: 'Linia 1\nLinia 2' }, rows, handlowcy, cfgMeta, '2026-10-05 09:00');
+  const b = r.whatsapp.meta_body;
+  assert.equal(b.type, 'template');
+  assert.equal(b.template.name, 'klimatech_nowy_lead');
+  assert.equal(b.to, '48600111222'); // tryb testowy: numer testowy, bez @c.us
+  const pola = b.template.components[0].parameters.map((p) => p.text);
+  assert.equal(pola.length, 7);
+  assert.ok(pola.every((t) => !/[\n\t]/.test(t) && !t.includes('*'))); // wymóg Meta
+  assert.equal(pola[6], 'L-041');
+  assert.deepEqual(b.template.components.slice(1).map((c) => c.parameters[0].payload), ['L-041|dodzwoniono', 'L-041|nie_odebral', 'L-041|umowione', 'L-041|niezainteresowany']);
+  assert.equal(core.processInquiry({ firma: 'X', telefon: '700 300 401' }, rows, handlowcy, cfgWa, '2026-10-05 09:00').whatsapp.meta_body, undefined); // Green API – bez zmian
+});
+test('Meta: kliknięcie przycisku i odpowiedź tekstem -> status w arkuszu i potwierdzenie zwykłym tekstem (okno 24 h)', () => {
+  const klik = core.metaDoWiadomosci(zMety([{ from: '48600111222', id: 'wamid.A1', timestamp: '1791300000', type: 'button',
+    button: { payload: 'L-005|dodzwoniono', text: '✅ Dodzwoniłem się' }, context: { from: '48600999999', id: 'wamid.LEAD' } }]));
+  assert.deepEqual(klik, [{ type: 'incoming', idMessage: 'wamid.A1', timestamp: 1791300000, chatId: '48600111222@c.us', textMessage: 'L-005 1' }]);
+  const out = core.processWaReplies(klik, rows, handlowcy, cfgMeta, '2026-10-05 10:00')[0];
+  assert.equal(out.update.status, 'dodzwoniono');
+  assert.equal(out.reply.meta_body.type, 'text');
+  assert.match(out.reply.meta_body.text.body, /✅ Zapisano: L-005 Hydro-Max/);
+  const tekst = core.metaDoWiadomosci(zMety([{ from: '48600111222', id: 'wamid.A2', timestamp: '1791300100', type: 'text', text: { body: 'L-005 3 spotkanie we wtorek' } }]));
+  assert.equal(core.processWaReplies(tekst, rows, handlowcy, cfgMeta, '2026-10-05 10:00')[0].update.notatka, 'spotkanie we wtorek');
+  // szablony z przyciskami jako „interactive” (button_reply) też działają; statusy doręczeń są pomijane
+  assert.equal(core.metaDoWiadomosci(zMety([{ from: '48600111222', id: 'wamid.A3', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'L-005|umowione', title: '📅 Umówione' } } }]))[0].textMessage, 'L-005 3');
+  assert.deepEqual(core.metaDoWiadomosci({ entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.X', status: 'delivered' }] } }] }] }), []);
+});
+test('Meta: przypomnienie i zestawienia mają szablony z polami bez nowych linii', () => {
+  const sla = core.processCycle({ rows: [{ lead_id: 'L-901', data_zgloszenia: '2026-10-05 09:00', status: 'nowy', routing: 'handlowiec', handlowiec_id: 'H5', handlowiec: 'Ewa Sowa', sla_poziom: 0, firma: 'Firma' }], handlowcy, cfg: cfgMeta, now: '2026-10-05 13:00', sla: true });
+  assert.equal(sla.whatsapp[0].meta_body.template.name, 'klimatech_przypomnienie');
+  const z = core.zestawieniaPoranne(rows, [], handlowcy, cfgMeta, '2026-10-05 08:00');
+  assert.equal(z.marek.whatsapp.meta_body.template.name, 'klimatech_zestawienie_zespolu');
+  assert.ok(z.osobiste.every((o) => o.whatsapp.meta_body.template.name === 'klimatech_zestawienie'));
+  assert.ok([z.marek, ...z.osobiste].every((x) => x.whatsapp.meta_body.template.components[0].parameters.every((p) => !/\n/.test(p.text))));
+});

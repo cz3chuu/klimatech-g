@@ -32,6 +32,12 @@ const PRZYKLAD = {
   MAREK_WHATSAPP: '',
   ANIA_WHATSAPP: '',
   SUPABASE_URL: 'https://TWOJ-PROJEKT.supabase.co',
+  // WhatsApp Business API (Meta) – po weryfikacji firmy i rejestracji numeru: WHATSAPP = 'meta' (do tego czasu Green API)
+  WHATSAPP: 'green',
+  META_API_WERSJA: 'v21.0',
+  META_PHONE_ID: 'WKLEJ_PHONE_NUMBER_ID',
+  META_TOKEN: 'WKLEJ_TOKEN_SYSTEM_USER',
+  META_VERIFY_TOKEN: 'WYMYSL_DLUGI_LOSOWY_CIAG',
 };
 
 // Węzeł „Zgłoszenie”: ujednolica trzy wejścia do jednego kształtu danych i zapisuje, skąd przyszło (_wejscie)
@@ -94,7 +100,7 @@ function build(c) {
     },
     options: {},
   }, extra);
-  const konfiguracja = (pos, extraFields = []) => node('Konfiguracja', 'n8n-nodes-base.set', 3.4, pos, {
+  const konfiguracja = (pos, extraFields = [], nazwa = 'Konfiguracja') => node(nazwa, 'n8n-nodes-base.set', 3.4, pos, {
     mode: 'manual',
     includeOtherFields: false,
     assignments: {
@@ -103,16 +109,24 @@ function build(c) {
         ['STATUS_URL', `${c.N8N_URL}/webhook/status`], ['FORM_KLIENT_URL', `${c.N8N_URL}/form/klimatech`],
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
         ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
-        ['SUPABASE_URL', c.SUPABASE_URL], ['PROG_LIDER', c.PROG_LIDER], ...extraFields,
+        ['SUPABASE_URL', c.SUPABASE_URL], ['PROG_LIDER', c.PROG_LIDER],
+        ['WHATSAPP', c.WHATSAPP], ['META_API_WERSJA', c.META_API_WERSJA], ['META_PHONE_ID', c.META_PHONE_ID], ['META_TOKEN', c.META_TOKEN], ['META_VERIFY_TOKEN', c.META_VERIFY_TOKEN],
+        ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
     options: {},
   });
   const K = (f) => `$('Konfiguracja').first().json.${f}`;
   const greenUrl = (metoda, query = '') => `={{ ${K('GREEN_API_URL')} }}/waInstance{{ ${K('GREEN_ID')} }}/${metoda}/{{ ${K('GREEN_TOKEN')} }}${query}`;
-  const waSend = (name, pos, chatIdExpr, messageExpr, extra = {}) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
-    method: 'POST', url: greenUrl('sendMessage'), sendBody: true, specifyBody: 'json',
-    jsonBody: `={{ JSON.stringify({ chatId: ${chatIdExpr}, message: ${messageExpr} }) }}`, options: {},
+  // Wysyłka WhatsApp: WHATSAPP = green (makieta, Green API) albo meta (WhatsApp Business API – szablony z rdzenia, pole meta_body)
+  const META = `${K('WHATSAPP')} === 'meta'`;
+  const waSend = (name, pos, obj, extra = {}) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
+    method: 'POST',
+    url: `={{ ${META} ? 'https://graph.facebook.com/' + ${K('META_API_WERSJA')} + '/' + ${K('META_PHONE_ID')} + '/messages' : ${K('GREEN_API_URL')} + '/waInstance' + ${K('GREEN_ID')} + '/sendMessage/' + ${K('GREEN_TOKEN')} }}`,
+    sendHeaders: true,
+    headerParameters: { parameters: [{ name: 'Authorization', value: `={{ ${META} ? 'Bearer ' + ${K('META_TOKEN')} : 'none' }}` }] },
+    sendBody: true, specifyBody: 'json',
+    jsonBody: `={{ JSON.stringify(${META} ? ${obj}.meta_body : { chatId: ${obj}.chatId, message: ${obj}.message }) }}`, options: {},
   }, { onError: 'continueRegularOutput', ...extra });
   const waGet = (name, pos, metoda) => node(name, 'n8n-nodes-base.httpRequest', 4.2, pos,
     { method: 'GET', url: greenUrl(metoda, '?minutes=10'), options: {} },
@@ -185,11 +199,11 @@ function build(c) {
     ifOnce('Mail?', [X(11), -120], `={{ ${K('KANAL')} !== 'whatsapp' }}`),
     gmail('Wyślij mail', [X(12), -240], `={{ ${PL}.email.to }}`, `={{ ${PL}.email.subject }}`, `={{ ${PL}.email.html }}`, { executeOnce: true }),
     ifOnce('WhatsApp?', [X(13), -120], `={{ !!${PL}.whatsapp }}`),
-    waSend('Wyślij WhatsApp', [X(14), -240], `${PL}.whatsapp.chatId`, `${PL}.whatsapp.message`, { executeOnce: true }),
+    waSend('Wyślij WhatsApp', [X(14), -240], `${PL}.whatsapp`, { executeOnce: true }),
     // Lead powyżej progu: informacja dla Marka jako lidera sprzedaży (lead zostaje u handlowca)
     ifOnce('Lider?', [X(15), -120], `={{ !!${PL}.lider }}`),
     gmail('Mail do lidera', [X(16), -240], `={{ ${PL}.lider.email ? ${PL}.lider.email.to : '' }}`, `={{ ${PL}.lider.email ? ${PL}.lider.email.subject : '' }}`, `={{ ${PL}.lider.email ? ${PL}.lider.email.html : '' }}`, { executeOnce: true }),
-    waSend('WhatsApp do lidera', [X(17), -240], `${PL}.lider.whatsapp.chatId`, `${PL}.lider.whatsapp.message`, { executeOnce: true }),
+    waSend('WhatsApp do lidera', [X(17), -240], `${PL}.lider.whatsapp`, { executeOnce: true }),
     // Odpowiedź: formularze -> strona wyniku; webhook -> JSON (200 / 400)
     ifOnce('Z formularza?', [X(18), 0], `={{ ${PL}.wejscie !== 'webhook' }}`),
     node('Strona wyniku', 'n8n-nodes-base.form', 1, [X(19), -100], { operation: 'completion', respondWith: 'showText', responseText: `={{ ${PL}.strona }}` }),
@@ -235,7 +249,7 @@ function build(c) {
     galaz('Wpisy historii', -75, 'historia'), append('Zapisz historię', [X(9), -75], 'Historia'),
     galaz('Wyniki skrzynki', 75, 'wyniki'), update('Zapisz wynik w wierszu', [X(9), 75], 'Wpisz lead', 'row_number'),
     galaz('Maile', 225, 'emaile'), gmail('Wyślij mail', [X(9), 225], '={{ $json.to }}', '={{ $json.subject }}', '={{ $json.html }}'),
-    galaz('WhatsAppy', 375, 'whatsapp'), waSend('Wyślij WhatsApp', [X(9), 375], '$json.chatId', '$json.message'),
+    galaz('WhatsAppy', 375, 'whatsapp'), waSend('Wyślij WhatsApp', [X(9), 375], '$json'),
   ], {
     'Co minutę': { main: [[to('Konfiguracja')]] },
     'Test ręczny': { main: [[to('Konfiguracja')]] },
@@ -322,7 +336,41 @@ return out;`, { executeOnce: true }),
     ...chain('Pobierz leady', 'Pobierz historię', 'Przygotuj dane', 'Zapisz w Supabase', 'Do usunięcia', 'Usuń nieaktualne'),
   });
 
+  // ======================================================================
+  // 5. WHATSAPP BUSINESS (META) – ODBIÓR: weryfikacja webhooka i kliknięcia przycisków. Włączyć po wdrożeniu (publiczny HTTPS).
+  // ======================================================================
+  const W5 = wf('KlimatechWfM0001', 'Klimatech 5 – WhatsApp Business (Meta) – odbiór', [
+    // Meta przy podpinaniu webhooka wysyła GET z hub.verify_token i oczekuje odesłania hub.challenge
+    node('Weryfikacja Meta', 'n8n-nodes-base.webhook', 2, [0, -200], { httpMethod: 'GET', path: 'whatsapp', responseMode: 'responseNode', options: {} }, { webhookId: uid('e2e2e2e2') }),
+    konfiguracja([X(1), -200], [], 'Konfiguracja (weryfikacja)'),
+    ifTrue('Token zgodny?', [X(2), -200], "={{ $('Weryfikacja Meta').first().json.query['hub.verify_token'] === $('Konfiguracja (weryfikacja)').first().json.META_VERIFY_TOKEN }}"),
+    node('Odeślij challenge', 'n8n-nodes-base.respondToWebhook', 1.1, [X(3), -280], { respondWith: 'text', responseBody: "={{ $('Weryfikacja Meta').first().json.query['hub.challenge'] }}", options: { responseCode: 200 } }),
+    node('Odmów', 'n8n-nodes-base.respondToWebhook', 1.1, [X(3), -120], { respondWith: 'text', responseBody: 'Forbidden', options: { responseCode: 403 } }),
+    // Wiadomości: Meta wymaga szybkiego 200 – odpowiadamy od razu, przetwarzamy potem
+    node('Wiadomość z Meta', 'n8n-nodes-base.webhook', 2, [0, 120], { httpMethod: 'POST', path: 'whatsapp', responseMode: 'onReceived', options: {} }, { webhookId: uid('e3e3e3e3') }),
+    konfiguracja([X(1), 120]),
+    getRows('Pobierz leady', [X(2), 120], 'Leady'),
+    getRows('Pobierz handlowców', [X(3), 120], 'Handlowcy'),
+    getRows('Pobierz nieobecności', [X(4), 120], 'Nieobecności', { onError: 'continueRegularOutput' }),
+    code('Przetwórz z Meta', [X(5), 120], dist('5-whatsapp-meta.js')),
+    code('Aktualizacje', [X(6), 0], 'return $input.all().filter((i) => i.json.update).map((i) => ({ json: i.json.update }));'),
+    update('Aktualizuj lead', [X(7), 0]),
+    code('Wpisy historii', [X(6), 120], 'return $input.all().flatMap((i) => (i.json.historia || []).map((h) => ({ json: h })));'),
+    append('Zapisz historię', [X(7), 120], 'Historia'),
+    code('Potwierdzenia', [X(6), 240], 'return $input.all().filter((i) => i.json.reply).map((i) => ({ json: i.json.reply }));'),
+    waSend('Odpisz handlowcowi', [X(7), 240], '$json'),
+  ], {
+    ...chain('Weryfikacja Meta', 'Konfiguracja (weryfikacja)', 'Token zgodny?'),
+    'Token zgodny?': { main: [[to('Odeślij challenge')], [to('Odmów')]] },
+    ...chain('Wiadomość z Meta', 'Konfiguracja', 'Pobierz leady', 'Pobierz handlowców', 'Pobierz nieobecności', 'Przetwórz z Meta'),
+    'Przetwórz z Meta': { main: [[to('Aktualizacje'), to('Wpisy historii'), to('Potwierdzenia')]] },
+    'Aktualizacje': { main: [[to('Aktualizuj lead')]] },
+    'Wpisy historii': { main: [[to('Zapisz historię')]] },
+    'Potwierdzenia': { main: [[to('Odpisz handlowcowi')]] },
+  });
+
   return {
+    '5-whatsapp-meta-odbior': W5,
     '1-przyjecie-leada': W1,
     '2-obsluga-co-minute': W2,
     '3-status-z-linku': W3,
