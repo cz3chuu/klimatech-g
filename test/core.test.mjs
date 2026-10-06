@@ -416,3 +416,43 @@ test('Zestawienia: sekcje handlowca rozłączne, „wczoraj” z historii, Marek
   assert.ok(z.osobiste.every((o) => !/Termex/.test(o.email.html))); // Termex zgłosi się dopiero 1.10
   assert.ok(z.historia.some((h) => /poranne zestawienie: Marek/.test(h.szczegoly)));
 });
+
+// --- zespół: nieobecności (L4 Tomasza) i odejścia (Michał do 30.11) ---
+const L4 = [{ handlowiec_id: 'H1', od: '2026-10-07', do: '2026-10-20', zastepca_id: 'H2', powod: 'L4', anulowana: '' }];
+const cfgL4 = { ...cfgWa, NIEOBECNOSCI: L4 };
+test('Nieobecność: nowe leady Tomasza i całe podlaskie idą do Kasi z oznaczeniem zastępstwa; po powrocie wracają', () => {
+  const r = core.processInquiry({ firma: 'Radom Nowy', telefon: '700 444 001', wojewodztwo: 'mazowieckie' }, rows, handlowcy, cfgL4, '2026-10-08 10:00');
+  assert.equal(r.row.handlowiec_id, 'H2');
+  assert.equal(r.row.zastepstwo_za, 'H1');
+  assert.match(r.whatsapp.message, /👥 Zastępstwo za Tomasz Wrona \(nieobecność do 20\.10\)/);
+  assert.match(r.historia.find((h) => h.zdarzenie === 'przypisano').szczegoly, /zastępstwo za Tomasz Wrona/);
+  for (let i = 0; i < 10; i++) assert.equal(core.processInquiry({ firma: 'Białystok ' + i, telefon: `700 444 1${i}0`, wojewodztwo: 'podlaskie' }, rows, handlowcy, cfgL4, '2026-10-08 10:00').row.handlowiec_id, 'H2');
+  assert.equal(core.processInquiry({ firma: 'Po powrocie', telefon: '700 444 002', wojewodztwo: 'mazowieckie' }, rows, handlowcy, cfgL4, '2026-10-21 09:00').row.handlowiec_id, 'H1');
+  assert.equal(core.processInquiry({ firma: 'Przed L4', telefon: '700 444 003', wojewodztwo: 'łódzkie' }, rows, handlowcy, cfgL4, '2026-10-06 15:00').row.handlowiec_id, 'H1');
+  // anulowana nieobecność nie działa
+  assert.equal(core.processInquiry({ firma: 'Anulowane', telefon: '700 444 004', wojewodztwo: 'mazowieckie' }, rows, handlowcy, { ...cfgWa, NIEOBECNOSCI: [{ ...L4[0], anulowana: 'true' }] }, '2026-10-08 10:00').row.handlowiec_id, 'H1');
+});
+test('Nieobecność: otwarte leady Tomasza – przypomnienia i zestawienie u Kasi („za”), Kasia może je potwierdzać na WhatsAppie', () => {
+  const l007 = rows.find((r) => r.lead_id === 'L-007');
+  const odbiorca = core.recipientFor(l007, handlowcy, cfgL4, '2026-10-08 10:00');
+  assert.equal(odbiorca.id, 'H2');
+  assert.equal(odbiorca.zaKogo, 'Tomasz Wrona');
+  const z = core.zestawieniaPoranne(rows, [], handlowcy, cfgL4, '2026-10-08 08:00');
+  const kasia = z.osobiste.find((o) => o.osoba.id === 'H2');
+  assert.match(kasia.email.html, /za: Tomasz Wrona/);
+  assert.ok(!z.osobiste.some((o) => o.osoba.id === 'H1')); // nieobecny nie dostaje zestawienia
+  assert.match(z.marek.email.html, /Nieobecności i zastępstwa dziś[\s\S]*Tomasz Wrona[\s\S]*L4 do 20\.10[\s\S]*zastępuje: <b>Katarzyna Lis/);
+  const hz = handlowcy.map((h) => ({ ...h, whatsapp: h.handlowiec_id === 'H2' ? '501000002' : h.whatsapp }));
+  const prod = { ...cfgL4, TRYB_TESTOWY: 'false' };
+  const odp = (now) => core.processWaReplies([msg('1 rozmawiałam za Tomka', '🆔 L-007', '48501000002@c.us')], rows, hz, prod, now)[0];
+  assert.equal(odp('2026-10-08 10:00').update.status, 'dodzwoniono');
+  assert.match(odp('2026-10-06 10:00').reply.message, /nie jest Twoim leadem/); // przed L4 – nie
+});
+test('Odejście: po dacie „aktywny do” handlowiec nie dostaje leadów, region wspólny przechodzi na drugą osobę', () => {
+  const hz = handlowcy.map((h) => (h.handlowiec_id === 'H6' ? { ...h, aktywny_do: '2026-11-30' } : h));
+  const lub = (now, i) => core.processInquiry({ firma: 'Lubuskie ' + i, telefon: `700 555 0${i}0`, wojewodztwo: 'lubuskie' }, rows, hz, cfgWa, now).row.handlowiec_id;
+  assert.ok([...Array(8)].every((_, i) => lub('2026-12-01 09:00', i) === 'H4')); // tylko Bartosz
+  const dol = core.processInquiry({ firma: 'Wrocław', telefon: '700 555 100', wojewodztwo: 'dolnośląskie' }, rows, hz, cfgWa, '2026-12-01 09:00');
+  assert.equal(dol.row.routing, 'bez_opiekuna'); // dopóki nikt nie dostanie dolnośląskiego – do Marka
+  assert.equal(core.processInquiry({ firma: 'Wrocław 2', telefon: '700 555 101', wojewodztwo: 'dolnośląskie' }, rows, hz, cfgWa, '2026-11-30 09:00').row.handlowiec_id, 'H6');
+});

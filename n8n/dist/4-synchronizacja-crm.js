@@ -213,19 +213,45 @@ function findDuplicate(lead, existing) {
 
 // ---------------- Routing ----------------
 
-// województwo -> lista opiekunów. Województwo wpisane u dwóch osób (zakładka Handlowcy) = region wspólny.
-function parseHandlowcy(rows) {
+// ---------------- Zespół: odejścia i nieobecności (zarządzane w CRM -> Supabase -> arkusz) ----------------
+// Handlowiec z aktywny_do (YYYY-MM-DD) w przeszłości nie dostaje nowych leadów.
+// Nieobecność (cfg.NIEOBECNOSCI): handlowiec_id, od_dnia, do_dnia (puste = bezterminowo), zastepca_id, powod, anulowana.
+// („do” to słowo zastrzeżone w SQL – stąd od_dnia/do_dnia; krótkie od/do też są akceptowane)
+const nOd = (n) => String(n.od_dnia || n.od || '').slice(0, 10);
+const nDo = (n) => String(n.do_dnia || n.do || '').trim().slice(0, 10);
+function aktywny(h, now) {
+  const doKiedy = String(h.aktywny_do || '').trim().slice(0, 10);
+  return !doKiedy || !now || String(now).slice(0, 10) <= doKiedy;
+}
+function nieobecnoscDla(id, cfg, now) {
+  if (!now || !id) return null;
+  const dzien = String(now).slice(0, 10);
+  return (cfg.NIEOBECNOSCI || []).find((n) => n.handlowiec_id === id && !['true', 'tak', '1'].includes(String(n.anulowana || '').toLowerCase()) &&
+    nOd(n) <= dzien && (!nDo(n) || dzien <= nDo(n))) || null;
+}
+// Kto faktycznie obsługuje leady danej osoby dziś (łańcuch zastępstw, max 3 kroki); null = osoba obecna
+function zastepcaDla(id, cfg, now) {
+  let biezacy = id, n = null, krok = 0;
+  while ((n = nieobecnoscDla(biezacy, cfg, now)) && n.zastepca_id && krok++ < 3) biezacy = n.zastepca_id;
+  return biezacy !== id ? biezacy : null;
+}
+
+// województwo -> lista aktywnych opiekunów. Województwo wpisane u dwóch osób = region wspólny.
+function parseHandlowcy(rows, now) {
   const map = {};
-  rows.forEach((h) => String(h.wojewodztwa || '').split(';').map((w) => w.trim().toLowerCase()).filter(Boolean)
+  rows.filter((h) => aktywny(h, now)).forEach((h) => String(h.wojewodztwa || '').split(';').map((w) => w.trim().toLowerCase()).filter(Boolean)
     .forEach((w) => { (map[w] = map[w] || []).push({ id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email }); }));
   return map;
 }
 // Region wspólny: lead dostaje opiekun z mniejszą liczbą leadów z tego województwa (pół na pół), przy remisie – losowo.
 // Czysty los przy kilku leadach miesięcznie mógłby dać np. 5:1 – przy prowizjach to proszenie się o spór.
-function route(wojewodztwo, handlowcyMap, existing = []) {
+// Nieobecny nie bierze udziału w podziale, jeśli w regionie jest ktoś obecny.
+function route(wojewodztwo, handlowcyMap, existing = [], dostepny = () => true) {
   if (!wojewodztwo) return { routing: 'do_ustalenia', handlowiec: null };
-  const lista = handlowcyMap[wojewodztwo] || [];
-  if (!lista.length) return { routing: 'bez_opiekuna', handlowiec: null };
+  const wszyscy = handlowcyMap[wojewodztwo] || [];
+  if (!wszyscy.length) return { routing: 'bez_opiekuna', handlowiec: null };
+  const obecni = wszyscy.filter((h) => dostepny(h.id));
+  const lista = obecni.length ? obecni : wszyscy;
   if (lista.length === 1) return { routing: 'handlowiec', handlowiec: lista[0] };
   const ile = (id) => existing.filter((r) => r.wojewodztwo === wojewodztwo && r.duplikat_typ !== 'pewny' && r.handlowiec_id === id).length;
   const liczby = lista.map((h) => ({ h, n: ile(h.id) }));
@@ -257,7 +283,14 @@ function osobaPoId(id, handlowcyRows, cfg) {
   const h = handlowcyRows.find((x) => x.handlowiec_id === id);
   return h ? { id: h.handlowiec_id, nazwa: h.imie_nazwisko, email: h.email, whatsapp: h.whatsapp || '' } : null;
 }
-function recipientFor(row, handlowcyRows, cfg) {
+// Odbiorca powiadomień o leadzie. Z datą (now): w czasie nieobecności opiekuna – zastępca (pole zaKogo).
+function recipientFor(row, handlowcyRows, cfg, now) {
+  const baza = odbiorcaBazowy(row, handlowcyRows, cfg);
+  const z = now && baza && zastepcaDla(baza.id, cfg, now);
+  const zastepca = z && osobaPoId(z, handlowcyRows, cfg);
+  return zastepca ? { ...zastepca, zaKogo: baza.nazwa, zaKogoId: baza.id } : baza;
+}
+function odbiorcaBazowy(row, handlowcyRows, cfg) {
   if (row.routing === 'bez_opiekuna') return marekOf(cfg);
   if (row.routing === 'do_ustalenia') return aniaOf(cfg);
   if (row.handlowiec_id === 'ANIA' || row.handlowiec_id === 'MAREK') return osobaPoId(row.handlowiec_id, handlowcyRows, cfg);
@@ -435,7 +468,7 @@ function processWaReplies(messages, rows, handlowcyRows, cfg, now) {
     if (!row) { out.push({ ...base, reply: reply(`❓ Nie znalazłem leada ${lead_id}.`) }); continue; }
     const kto = nadawcaH ? nadawcaH.handlowiec_id : marek ? 'MAREK' : ania ? 'ANIA' : (row.handlowiec_id || 'TEST');
     const ktoNazwa = nadawcaH ? nadawcaH.imie_nazwisko : marek ? 'Marek' : ania ? 'Ania (biuro)' : (row.handlowiec || 'Ania (biuro)');
-    if (nadawcaH && row.handlowiec_id !== nadawcaH.handlowiec_id) {
+    if (nadawcaH && row.handlowiec_id !== nadawcaH.handlowiec_id && zastepcaDla(row.handlowiec_id, cfg, now) !== nadawcaH.handlowiec_id) {
       out.push({ ...base, reply: reply(`⛔ ${lead_id} nie jest Twoim leadem – nic nie zmieniłem.`) });
       continue;
     }
@@ -465,7 +498,8 @@ function validateInput(inp) {
 }
 
 function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
-  const hMap = parseHandlowcy(handlowcyRows);
+  const hMap = parseHandlowcy(handlowcyRows, now);
+  const zespol = { NIEOBECNOSCI: opts.nieobecnosci || [] };
   const telefon_norm = normalizePhone(inp.telefon);
   const email_norm = normalizeEmail(inp.email);
   const firma_klucz = companyKey(inp.firma);
@@ -485,7 +519,16 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
     routing = dup.original.routing;
     handlowiec = dup.original.handlowiec_id ? { id: dup.original.handlowiec_id, nazwa: dup.original.handlowiec } : null;
   } else {
-    ({ routing, handlowiec, podzial = '' } = route(woj.wojewodztwo, hMap, existing));
+    ({ routing, handlowiec, podzial = '' } = route(woj.wojewodztwo, hMap, existing, (id) => !zastepcaDla(id, zespol, now)));
+  }
+
+  // Nieobecność opiekuna (urlop, L4): lead od razu u zastępcy, z informacją, za kogo (ważne przy prowizjach)
+  let zastepstwo_za = '';
+  const z = handlowiec && zastepcaDla(handlowiec.id, zespol, now);
+  if (z) {
+    const zast = handlowcyRows.find((h) => h.handlowiec_id === z);
+    zastepstwo_za = handlowiec.id;
+    handlowiec = { id: z, nazwa: z === 'ANIA' ? 'Ania (biuro)' : z === 'MAREK' ? 'Marek' : (zast ? zast.imie_nazwisko : z) };
   }
 
   const row = {
@@ -510,6 +553,7 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
     duplikat_of: dup && dup.original ? dup.original.lead_id : '',
     duplikat_typ: dup ? dup.typ : '',
     duplikat_powod: dup ? dup.powod : '',
+    zastepstwo_za,
     status: 'nowy',
     pierwszy_kontakt: '',
     kontakt_kto: '',
@@ -518,7 +562,7 @@ function buildLeadRow(inp, existing, handlowcyRows, now, opts = {}) {
     token: makeToken(),
     aktualizacja: now,
   };
-  return { row, dup, wyjatek, podzial };
+  return { row, dup, wyjatek, podzial, zastepstwo_za };
 }
 
 // Data faktycznego kontaktu (np. telefon o 9:10 wpisany o 11:00) – zegar SLA liczy się od niej; przyszłe daty ignorujemy
@@ -547,7 +591,7 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
   const errors = validateInput(inp);
   if (errors.length) return { valid: false, errors, response: { ok: false, errors } };
 
-  const { row, dup, wyjatek, podzial } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now), wyjatki: cfg.WYJATKI || [] });
+  const { row, dup, wyjatek, podzial, zastepstwo_za } = buildLeadRow(inp, existing, handlowcyRows, now, { data_zgloszenia: dataKontaktu(inp, now), wyjatki: cfg.WYJATKI || [], nieobecnosci: cfg.NIEOBECNOSCI || [] });
   // Podwójne kliknięcie / ponowne wysłanie tych samych danych w ciągu 30 min: nie zapisujemy drugi raz i nie alarmujemy handlowca
   const powt = powtorneWyslanie(row, existing, now);
   if (powt) {
@@ -564,7 +608,10 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
 
   // Przyciski statusu: przy pewnym duplikacie dotyczą leada pierwotnego
   const target = pewny ? original : row;
-  const odbiorca = recipientFor(row, handlowcyRows, cfg);
+  const odbiorca = recipientFor(row, handlowcyRows, cfg, now);
+  const zaKogo = zastepstwo_za ? (osobaPoId(zastepstwo_za, handlowcyRows, cfg) || { nazwa: zastepstwo_za }).nazwa : '';
+  const nieob = zastepstwo_za ? nieobecnoscDla(zastepstwo_za, cfg, now) : null;
+  const zastepstwoTxt = zaKogo ? `Zastępstwo za ${zaKogo}${nieob && nDo(nieob) ? ` (nieobecność do ${nDo(nieob).slice(8, 10)}.${nDo(nieob).slice(5, 7)})` : ''}.` : '';
   const opis = `${row.firma || row.osoba} (${row.wojewodztwo || 'woj. nieustalone'})`;
 
   let subject, intro, waNaglowek, waInfo = '';
@@ -609,6 +656,8 @@ function processInquiry(inp, existing, handlowcyRows, cfg, now) {
       : 'Nowe zapytanie z Twojego regionu. Cel: telefon w ciągu 4 godzin roboczych.';
   }
 
+  if (zastepstwoTxt) { waInfo += `${waInfo ? '\n' : ''}👥 ${zastepstwoTxt}`; intro += `<br><br>👥 ${esc(zastepstwoTxt)}`; }
+
   const cc = [];
   if (dup && dup.typ === 'mozliwy') {
     waInfo += `${waInfo ? '\n' : ''}ℹ Możliwy duplikat ${dup.original ? dup.original.lead_id : ''} (${dup.powod}) – biuro potwierdzi.`;
@@ -651,7 +700,7 @@ Opiekun: *${odbiorca.nazwa}*
     { czas: now, lead_id: row.lead_id, zdarzenie: 'utworzono', kto: wprowadzil, szczegoly: `źródło: ${row.zrodlo}; woj.: ${row.wojewodztwo || '—'} (${row.wojewodztwo_zrodlo})${row.data_zgloszenia !== now ? `; kontakt klienta: ${row.data_zgloszenia}` : ''}${inp.zgoda ? '; zgoda na kontakt (RODO): tak' : ''}` },
   ];
   if (dup) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: dup.typ === 'pewny' ? 'duplikat' : 'mozliwy_duplikat', kto: 'system', szczegoly: `${dup.original ? dup.original.lead_id : ''} po: ${dup.powod}` });
-  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}${wyjatek ? ` (wyjątek: ${String(wyjatek.opis || wyjatek.wartosc).trim()})` : ''}${podzial ? ` (region wspólny, dotychczas: ${podzial})` : ''}` });
+  historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'przypisano', kto: 'system', szczegoly: `${row.routing}: ${odbiorca.nazwa}${wyjatek ? ` (wyjątek: ${String(wyjatek.opis || wyjatek.wartosc).trim()})` : ''}${podzial ? ` (region wspólny, dotychczas: ${podzial})` : ''}${zaKogo ? ` (zastępstwo za ${zaKogo})` : ''}` });
   if (String(cfg.KANAL || 'mail') !== 'whatsapp') historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `mail do ${odbiorca.email}${cc.length ? ' cc ' + cc.join(',') : ''}` });
   if (whatsapp) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `WhatsApp do ${odbiorca.nazwa}` });
   if (lider) historia.push({ czas: now, lead_id: row.lead_id, zdarzenie: 'powiadomienie', kto: 'system', szczegoly: `lider sprzedaży: Marek (wartość powyżej ${zl(prog)})` });
@@ -778,7 +827,7 @@ function checkSla(rows, handlowcyRows, cfg, now) {
     const min = businessMinutes(r.data_zgloszenia, now);
     const level = slaLevelAt(r.data_zgloszenia, now);
     if (level <= (Number(r.sla_poziom) || 0)) continue;
-    const owner = recipientFor(r, handlowcyRows, cfg);
+    const owner = recipientFor(r, handlowcyRows, cfg, now);
     out.push({
       lead_id: r.lead_id, poziom: level, minuty: min,
       do: owner,
@@ -867,7 +916,7 @@ function morningReport(rows, handlowcyRows, cfg, now) {
   const grupy = {};
   const dodaj = (odbiorca, it) => { (grupy[odbiorca.id] = grupy[odbiorca.id] || { do: odbiorca, items: [] }).items.push(it); };
   otwarte.forEach((it) => {
-    const opiekun = recipientFor(it.wiersz, handlowcyRows, cfg);
+    const opiekun = recipientFor(it.wiersz, handlowcyRows, cfg, now);
     dodaj(opiekun, { ...it, opiekun });
     // Marek widzi wszystko po SLA (> 1 dzień roboczy), także leady handlowców
     if (opiekun.id !== marek.id && slaLevelAt(it.wiersz.data_zgloszenia, now) >= 2) dodaj(marek, { ...it, opiekun });
@@ -956,7 +1005,7 @@ function danePoranne(rows, historia, handlowcyRows, cfg, now) {
     else if (poziom === 2) powod = `po terminie (minął ${termin.slice(8, 10)}.${termin.slice(5, 7)} 16:00)`;
     else if (termin.slice(0, 10) === dzis) powod = 'termin mija dziś o 16:00';
     else if (r.status === 'nie_odebral') powod = `nie odebrał (${r.proby || 1}×) – spróbuj ponownie`;
-    return { ...it, poziom, termin, nowy, powod, naDzis: !!powod, opiekun: recipientFor(r, handlowcyRows, cfg) };
+    return { ...it, poziom, termin, nowy, powod, naDzis: !!powod, opiekun: recipientFor(r, handlowcyRows, cfg, now) };
   });
 
   // Obsłużone w oknie: zmiany statusu z historii (ostatnia na lead), wynik i notatka z aktualnego wiersza
@@ -967,7 +1016,7 @@ function danePoranne(rows, historia, handlowcyRows, cfg, now) {
     const r = byId[h.lead_id];
     const pierwszyWOknie = wOknie(r.pierwszy_kontakt);
     return {
-      wiersz: r, kto: h.kto || r.handlowiec, czas: h.czas, opiekun: recipientFor(r, handlowcyRows, cfg),
+      wiersz: r, kto: h.kto || r.handlowiec, czas: h.czas, opiekun: recipientFor(r, handlowcyRows, cfg, now),
       reakcja: pierwszyWOknie ? businessMinutes(r.data_zgloszenia, r.pierwszy_kontakt) : null,
       wTerminie: pierwszyWOknie ? String(r.pierwszy_kontakt).slice(0, 16) <= terminDoby(r.data_zgloszenia) : null,
     };
@@ -996,7 +1045,7 @@ function wierszLeada(it, cfg, kto, dodatki = '') {
   const r = it.wiersz;
   const kolor = it.poziom >= 3 ? '#7c1515' : it.poziom === 2 ? '#b42318' : it.powod && it.powod.startsWith('termin') ? '#b45309' : '#5d6a76';
   return `<div style="border:1px solid #e1e6eb;border-left:4px solid ${kolor};border-radius:8px;padding:10px 12px;margin:8px 0;font:14px Arial,sans-serif;color:#142029">
-<b>${esc(r.firma || r.osoba)}</b>${it.ponowienia ? badge(`pisał ${it.ponowienia + 1}×`, '#b45309', '#fbefdc') : ''}${it.nowy ? badge('NOWY', '#0e5c88', '#e2eef6') : ''}${Number(r.szac_wartosc_pln) > (Number(cfg.PROG_LIDER) || 50000) ? badge('💰 duży', '#4b45a1', '#eae9f9') : ''}
+<b>${esc(r.firma || r.osoba)}</b>${it.ponowienia ? badge(`pisał ${it.ponowienia + 1}×`, '#b45309', '#fbefdc') : ''}${it.opiekun && it.opiekun.zaKogo ? badge(`za: ${it.opiekun.zaKogo}`, '#0f766e', '#dff5f1') : r.zastepstwo_za ? badge('zastępstwo', '#0f766e', '#dff5f1') : ''}${it.nowy ? badge('NOWY', '#0e5c88', '#e2eef6') : ''}${Number(r.szac_wartosc_pln) > (Number(cfg.PROG_LIDER) || 50000) ? badge('💰 duży', '#4b45a1', '#eae9f9') : ''}
 <span style="float:right;font-weight:bold">${zl(r.szac_wartosc_pln)}</span><br>
 <span style="color:#5d6a76;font-size:13px">${esc(r.lead_id)} · ${esc(r.miasto || '')}${r.wojewodztwo ? ', ' + esc(r.wojewodztwo) : ''} · 📞 <a href="tel:${esc(r.telefon_norm)}" style="color:#142029">${esc(formatPhone(r.telefon_norm) || r.telefon || r.email)}</a>${dodatki}</span>
 ${it.powod ? `<br><span style="color:${kolor};font-size:13px;font-weight:bold">${esc(it.powod)}</span>` : ''}
@@ -1042,6 +1091,9 @@ function zestawienieHandlowca(osoba, d, cfg) {
 
 function zestawienieMarka(d, osoby, cfg) {
   const marek = marekOf(cfg);
+  const nazwa = (id) => (osoby.find((o) => o.id === id) || osobaPoId(id, [], cfg) || { nazwa: id }).nazwa;
+  const dzisNieob = osoby.map((o) => ({ o, n: nieobecnoscDla(o.id, cfg, d.now) })).filter((x) => x.n);
+  const nieobHtml = dzisNieob.map(({ o, n }) => `<div style="padding:6px 0;font:14px Arial,sans-serif;color:#142029">👤 <b>${esc(o.nazwa)}</b> – ${esc(n.powod || 'nieobecność')} ${nDo(n) ? `do ${nDo(n).slice(8, 10)}.${nDo(n).slice(5, 7)}` : 'bezterminowo'}${n.zastepca_id ? ` · zastępuje: <b>${esc(nazwa(n.zastepca_id))}</b>` : ' · <b style="color:#b42318">brak zastępcy</b>'}</div>`).join('');
   const pierwsze = d.obsluzone.filter((o) => o.wTerminie !== null);
   const wTerminie = pierwsze.filter((o) => o.wTerminie).length;
   const proc = pierwsze.length ? Math.round((wTerminie / pierwsze.length) * 100) + '%' : '—';
@@ -1057,12 +1109,13 @@ ${osoby.map((o) => {
     const ob = d.obsluzone.filter((x) => x.opiekun.id === o.id).length;
     const pt = ot.filter((it) => it.poziom === 2).length, es = ot.filter((it) => it.poziom >= 3).length;
     const czerw = (n) => (n ? `<b style="color:#b42318">${n}</b>` : '<span style="color:#8a96a1">0</span>');
-    return `<tr style="border-top:1px solid #eef1f4"><td style="padding:7px 4px"><b>${esc(o.nazwa)}</b></td><td style="padding:7px 4px;text-align:right">${nowe}</td><td style="padding:7px 4px;text-align:right">${ob}</td><td style="padding:7px 4px;text-align:right">${ot.length}</td><td style="padding:7px 4px;text-align:right">${czerw(pt)}</td><td style="padding:7px 4px;text-align:right">${czerw(es)}</td><td style="padding:7px 4px;text-align:right">${suma(ot)}</td></tr>`;
+    return `<tr style="border-top:1px solid #eef1f4"><td style="padding:7px 4px"><b>${esc(o.nazwa)}</b>${nieobecnoscDla(o.id, cfg, d.now) ? ' <span style="color:#0f766e;font-size:12px">(nieobecny)</span>' : ''}</td><td style="padding:7px 4px;text-align:right">${nowe}</td><td style="padding:7px 4px;text-align:right">${ob}</td><td style="padding:7px 4px;text-align:right">${ot.length}</td><td style="padding:7px 4px;text-align:right">${czerw(pt)}</td><td style="padding:7px 4px;text-align:right">${czerw(es)}</td><td style="padding:7px 4px;text-align:right">${suma(ot)}</td></tr>`;
   }).join('')}</table>`;
   const html = ramkaMaila('📊 Poranne zestawienie zespołu', `${dataSlownie(d.now)} · stan na ${d.now.slice(11, 16)} · „wczoraj” = od ${d.od.slice(8, 10)}.${d.od.slice(5, 7)} 8:00`,
     [['nowe', d.nowe.length], ['obsłużone', d.obsluzone.length, '#17803d'], ['w terminie doby', proc], ['otwarte', `${d.otwarte.length}`], ['po terminie', poTerminie.length, poTerminie.length ? '#b42318' : ''], ['eskalacje', eskalacje.length, eskalacje.length ? '#7c1515' : '']],
     [
       sekcja('👥 Zespół', '#142029', osoby.length, tabela, ''),
+      ...(dzisNieob.length ? [sekcja('🏖️ Nieobecności i zastępstwa dziś', '#0f766e', dzisNieob.length, nieobHtml, '')] : []),
       sekcja('🚨 Eskalacje – bez kontaktu ponad 2 dni robocze', '#7c1515', eskalacje.length, eskalacje.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Brak eskalacji.'),
       sekcja('⏰ Po terminie doby (wczoraj do 16:00)', '#b42318', poTerminie.length, poTerminie.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Wszystkie leady w terminie.'),
       sekcja(`💰 Duże leady (powyżej ${zl(d.prog)}) bez kontaktu`, '#4b45a1', duze.length, duze.map((it) => wierszLeada(it, cfg, '', ` · opiekun: <b>${esc(it.opiekun.nazwa)}</b>`)).join(''), 'Brak otwartych dużych leadów.'),
@@ -1081,7 +1134,7 @@ ${osoby.map((o) => {
 // Wszystkie zestawienia dnia: handlowcy (i Ania, jeśli ma leady) + Marek
 function zestawieniaPoranne(rows, historia, handlowcyRows, cfg, now) {
   const d = danePoranne(rows, historia, handlowcyRows, cfg, now);
-  const osoby = handlowcyRows.filter((h) => h.handlowiec_id).map((h) => osobaPoId(h.handlowiec_id, handlowcyRows, cfg));
+  const osoby = handlowcyRows.filter((h) => h.handlowiec_id && aktywny(h, now)).map((h) => osobaPoId(h.handlowiec_id, handlowcyRows, cfg));
   if (d.otwarte.some((it) => it.opiekun.id === 'ANIA') || d.obsluzone.some((o) => o.opiekun.id === 'ANIA')) osoby.push(aniaOf(cfg));
   const osobiste = osoby.map((o) => zestawienieHandlowca(o, d, cfg))
     .filter((z) => z.liczby.otwarte || z.liczby.obsluzone); // kto nie ma nic – nie dostaje pustego maila
