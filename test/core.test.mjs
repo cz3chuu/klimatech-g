@@ -497,33 +497,3 @@ test('Meta: przypomnienie i zestawienia mają szablony z polami bez nowych linii
   assert.ok(z.osobiste.every((o) => o.whatsapp.meta_body.template.name === 'klimatech_zestawienie'));
   assert.ok([z.marek, ...z.osobiste].every((x) => x.whatsapp.meta_body.template.components[0].parameters.every((p) => !/\n/.test(p.text))));
 });
-
-// --- formularz na stronie: Contact Form 7 -> webhook (z kluczem dostępu) ---
-const zCF7 = { 'your-name': 'Jan Kowal', 'your-email': 'jan@instalkowal.example', 'your-tel': '700 919 919', 'your-company': 'Instal-Kowal',
-  'your-city': 'Gdańsk', 'your-region': 'pomorskie', zainteresowanie: ['pompy ciepła', 'rekuperacja'], wartosc: '40 000 zł',
-  'kim-jestes': ['instalator / firma instalacyjna'], 'your-message': '10 pomp na wiosnę', 'acceptance-rodo': '1', _wpcf7: '123', _wpcf7_unit_tag: 'wpcf7-f1' };
-test('CF7: domyślne nazwy pól tłumaczone na nasze, listy łączone, pola techniczne pomijane', () => {
-  const p = core.zFormularzaStrony(zCF7);
-  assert.deepEqual(p, { osoba: 'Jan Kowal', email: 'jan@instalkowal.example', telefon: '700 919 919', firma: 'Instal-Kowal', miasto: 'Gdańsk', wojewodztwo: 'pomorskie',
-    zainteresowanie: 'pompy ciepła, rekuperacja', szac_wartosc_pln: 40000, wiadomosc: '[instalator / firma instalacyjna] 10 pomp na wiosnę', zgoda: true, zrodlo: 'formularz' });
-  assert.equal(core.zFormularzaStrony({ firma: 'Nasze pola', telefon: '700 1' }).firma, 'Nasze pola'); // nasze nazwy też działają
-  assert.equal(core.zFormularzaStrony({ 'your-region': '— wybierz —' }).wojewodztwo, undefined);
-});
-test('n8n/dist: webhook z CF7 – bez klucza odrzucony, z kluczem lead u handlowca z regionu', () => {
-  const code = readFileSync('n8n/dist/1-przyjecie-leada.js', 'utf8');
-  const uruchom = (klucz) => {
-    const nodes = { Konfiguracja: [{ ...cfgWa, WEBHOOK_KLUCZ: 'tajny123' }], 'Zgłoszenie': [{ ...zCF7, _wejscie: 'webhook', _klucz: klucz }], 'Pobierz leady': rows, 'Pobierz handlowców': handlowcy };
-    const $ = (n) => ({ all: () => (nodes[n] || []).map((json) => ({ json })), first: () => ({ json: (nodes[n] || [])[0] }) });
-    return new Function('$', code)($)[0].json;
-  };
-  const zly = uruchom('zly');
-  assert.equal(zly.valid, false);
-  assert.match(zly.response.errors[0], /Brak dostępu/);
-  assert.equal(uruchom('').valid, false);
-  const ok = uruchom('tajny123');
-  assert.equal(ok.valid, true);
-  assert.equal(ok.row.handlowiec_id, 'H5'); // pomorskie -> Ewa Sowa
-  assert.equal(ok.row.firma, 'Instal-Kowal');
-  assert.match(ok.historia[0].szczegoly, /zgoda na kontakt \(RODO\): tak/);
-  assert.equal(ok.row.szac_wartosc_pln, 40000);
-});

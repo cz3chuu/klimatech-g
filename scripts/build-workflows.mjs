@@ -34,7 +34,6 @@ const PRZYKLAD = {
   SUPABASE_URL: 'https://TWOJ-PROJEKT.supabase.co',
   // WhatsApp Business API (Meta) – po weryfikacji firmy i rejestracji numeru: WHATSAPP = 'meta' (do tego czasu Green API)
   WHATSAPP: 'green',
-  WEBHOOK_KLUCZ: '', // klucz dostępu do adresu formularza (w config.local.json – losowy, nie trafia do repo)
   META_API_WERSJA: 'v21.0',
   META_PHONE_ID: 'WKLEJ_PHONE_NUMBER_ID',
   META_TOKEN: 'WKLEJ_TOKEN_SYSTEM_USER',
@@ -42,12 +41,10 @@ const PRZYKLAD = {
 };
 
 // Węzeł „Zgłoszenie”: ujednolica trzy wejścia do jednego kształtu danych i zapisuje, skąd przyszło (_wejscie)
-const ZGLOSZENIE = `// Formularz na stronie (Contact Form 7 -> webhook, JSON) | formularz klienta n8n (etykiety pól) -> jeden kształt danych
+const ZGLOSZENIE = `// Webhook strony (JSON w body) | formularz klienta (etykiety pól) -> jeden kształt danych
 const j = $input.first().json;
-// klucz dostępu: ?klucz=… w adresie albo nagłówek X-Klimatech-Token (sprawdza go węzeł „Przetwórz lead”)
-const klucz = (j.query || {}).klucz || (j.headers || {})['x-klimatech-token'] || '';
-if (j.body && typeof j.body === 'object') return [{ json: { ...j.body, _wejscie: 'webhook', _klucz: klucz } }];
-if (typeof j.body === 'string') { try { return [{ json: { ...JSON.parse(j.body), _wejscie: 'webhook', _klucz: klucz } }]; } catch (e) { return [{ json: { _wejscie: 'webhook', _klucz: klucz } }]; } }
+if (j.body && typeof j.body === 'object') return [{ json: { ...j.body, _wejscie: 'webhook' } }];
+if (typeof j.body === 'string') { try { return [{ json: { ...JSON.parse(j.body), _wejscie: 'webhook' } }]; } catch (e) { return [{ json: { _wejscie: 'webhook' } }]; } }
 const POLA = {
   'Firma': 'firma', 'E-mail': 'email', 'Telefon': 'telefon', 'Miasto': 'miasto', 'Województwo': 'wojewodztwo', 'Wiadomość': 'wiadomosc',
   // formularz klienta
@@ -62,21 +59,6 @@ if (Array.isArray(out.zgoda)) out.zgoda = out.zgoda.length > 0;
 const kim = [].concat(j['Kim jesteś?'] || []).join(', ');
 if (kim) out.wiadomosc = '[' + kim + '] ' + (out.wiadomosc || '');
 return [{ json: out }];`;
-
-// Strona po otwarciu adresu formularza w przeglądarce: z poprawnym kluczem – „działa” i skrót instrukcji, bez – brak dostępu
-const STRONA_ADRESU = `const k = $('Konfiguracja (adres)').first().json;
-const q = $('Sprawdzenie adresu formularza').first().json.query || {};
-const ok = !String(k.WEBHOOK_KLUCZ || '').trim() || q.klucz === k.WEBHOOK_KLUCZ;
-const ramka = (t) => '<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Klimatech – adres formularza</title></head>'
-  + '<body style="margin:0;background:#f2f4f6;font:15px/1.55 Arial,sans-serif;color:#142029"><div style="max-width:640px;margin:32px auto;padding:24px;background:#fff;border:1px solid #e1e6eb;border-radius:12px">' + t + '</div></body></html>';
-const html = ok ? ramka('<h1 style="font-size:22px;margin:0 0 6px;color:#17803d">✅ Adres formularza działa</h1>'
-  + '<p style="margin:0 0 14px;color:#5d6a76">To jest adres, na który Contact Form 7 ma wysyłać zgłoszenia. Klucz dostępu jest poprawny.</p>'
-  + '<ul style="padding-left:20px;margin:0 0 14px"><li>Metoda: <b>POST</b>, format <b>JSON</b> (wtyczka „CF7 to Webhook”)</li>'
-  + '<li>Adres: ten sam, z parametrem <code>?klucz=…</code> (albo nagłówek <code>X-Klimatech-Token</code>)</li>'
-  + '<li>Pola: domyślne nazwy CF7 (<code>your-name</code>, <code>your-email</code>, <code>your-tel</code>, <code>your-message</code>) oraz <code>your-company</code>, <code>your-city</code>, <code>your-region</code>, <code>zainteresowanie</code>, <code>wartosc</code>, <code>acceptance-rodo</code></li></ul>'
-  + '<p style="margin:0;color:#5d6a76;font-size:14px">Zgłoszenie trafia od razu do handlowca z województwa klienta (WhatsApp + mail). Mail na biuro@ z formularza zostaje jako kopia.</p>')
-  : ramka('<h1 style="font-size:22px;margin:0 0 6px;color:#b42318">⚠️ Brak dostępu</h1><p style="margin:0;color:#5d6a76">Brakuje klucza albo jest nieprawidłowy. Użyj pełnego adresu z parametrem <code>?klucz=…</code>.</p>');
-return [{ json: { ok, html } }];`;
 
 const WOJ = ['dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
   'podkarpackie', 'podlaskie', 'pomorskie', 'śląskie', 'świętokrzyskie', 'warmińsko-mazurskie', 'wielkopolskie', 'zachodniopomorskie'];
@@ -128,7 +110,7 @@ function build(c) {
         ['KANAL', c.KANAL], ['TEST_WHATSAPP', c.TEST_WHATSAPP], ['MAREK_WHATSAPP', c.MAREK_WHATSAPP], ['ANIA_WHATSAPP', c.ANIA_WHATSAPP],
         ['GREEN_API_URL', c.GREEN_API_URL], ['GREEN_ID', c.GREEN_ID], ['GREEN_TOKEN', c.GREEN_TOKEN], ['GREEN_PHONE', c.GREEN_PHONE],
         ['SUPABASE_URL', c.SUPABASE_URL], ['PROG_LIDER', c.PROG_LIDER],
-        ['WEBHOOK_KLUCZ', c.WEBHOOK_KLUCZ], ['WHATSAPP', c.WHATSAPP], ['META_API_WERSJA', c.META_API_WERSJA], ['META_PHONE_ID', c.META_PHONE_ID], ['META_TOKEN', c.META_TOKEN], ['META_VERIFY_TOKEN', c.META_VERIFY_TOKEN],
+        ['WHATSAPP', c.WHATSAPP], ['META_API_WERSJA', c.META_API_WERSJA], ['META_PHONE_ID', c.META_PHONE_ID], ['META_TOKEN', c.META_TOKEN], ['META_VERIFY_TOKEN', c.META_VERIFY_TOKEN],
         ...extraFields,
       ].map(([name, value]) => ({ id: uid('5e7f1e1d'), name, value, type: 'string' })),
     },
@@ -176,7 +158,7 @@ function build(c) {
   // ======================================================================
   const PL = "$('Przetwórz lead').first().json";
   const W1 = wf('KlimatechWfA0001', 'Klimatech 1 – Przyjęcie leada', [
-    // Produkcja: Contact Form 7 (wtyczka „CF7 to Webhook”) wysyła JSON na /webhook/lead?klucz=… – instrukcja: docs/dla-agencji-cf7.md
+    // Produkcja: wtyczka formularza WordPress wysyła JSON na /webhook/lead
     node('Webhook strony WWW', 'n8n-nodes-base.webhook', 2, [0, -220], {
       httpMethod: 'POST', path: 'lead', responseMode: 'lastNode', responseData: 'firstEntryJson', options: { allowedOrigins: '*' },
     }, { webhookId: uid('e0e0e0e0') }),
@@ -299,16 +281,7 @@ function build(c) {
     append('Zapisz historię', [X(7), -100], 'Historia'),
     node('Pokaż potwierdzenie', 'n8n-nodes-base.respondToWebhook', 1.1, [X(8), -100], page("={{ $('Ustaw status').first().json.html }}", 200)),
     node('Pokaż błąd', 'n8n-nodes-base.respondToWebhook', 1.1, [X(4), 100], page('={{ $json.html }}', 400)),
-    // Otwarcie adresu formularza w przeglądarce (GET /webhook/lead?klucz=…) – sprawdzenie, czy adres i klucz działają
-    node('Sprawdzenie adresu formularza', 'n8n-nodes-base.webhook', 2, [0, 300], { httpMethod: 'GET', path: 'lead', responseMode: 'responseNode', options: {} }, { webhookId: uid('e4e4e4e4') }),
-    konfiguracja([X(1), 300], [], 'Konfiguracja (adres)'),
-    code('Strona adresu', [X(2), 300], STRONA_ADRESU),
-    node('Pokaż stan adresu', 'n8n-nodes-base.respondToWebhook', 1.1, [X(3), 300], {
-      respondWith: 'text', responseBody: '={{ $json.html }}',
-      options: { responseCode: '={{ $json.ok ? 200 : 403 }}', responseHeaders: { entries: [{ name: 'Content-Type', value: 'text/html; charset=utf-8' }] } },
-    }),
   ], {
-    ...chain('Sprawdzenie adresu formularza', 'Konfiguracja (adres)', 'Strona adresu', 'Pokaż stan adresu'),
     ...chain('Klik w link', 'Pobierz lead', 'Ustaw status', 'Czy poprawny?'),
     'Czy poprawny?': { main: [[to('Wiersz do aktualizacji')], [to('Pokaż błąd')]] },
     ...chain('Wiersz do aktualizacji', 'Aktualizuj lead', 'Historia', 'Zapisz historię', 'Pokaż potwierdzenie'),
