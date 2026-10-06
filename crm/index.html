@@ -203,6 +203,57 @@ ol.tl li:last-child::before { display: none; }
 .bar i.slabo { background: var(--warn); } .bar i.zle { background: var(--bad); }
 .h-note { padding: 12px 16px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
 
+/* ---------- zespół ---------- */
+#widok-zespol { display: grid; gap: 16px; }
+.team-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.team-head .spacer { flex: 1; }
+.team-title { margin: 0; font: 700 22px/1.2 var(--f-display); }
+.team-sec { padding: 14px 16px; display: grid; gap: 10px; }
+.team-h3 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 600; }
+.cover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; }
+.cover { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: grid; gap: 2px; min-width: 0; }
+.cover b { font-size: 13px; }
+.cover span { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.cover.wspolny { background: var(--accent-soft); border-color: transparent; }
+.cover.brak { background: var(--bad-soft); border-color: transparent; }
+.cover.brak span { color: var(--bad); font-weight: 600; }
+.team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
+.member { padding: 14px 16px; display: grid; gap: 10px; align-content: start; }
+.member.nieaktywny { opacity: .65; }
+.member-top { display: flex; gap: 10px; align-items: center; }
+.member-top b { font: 700 16px/1.2 var(--f-display); }
+.member-top small { display: block; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.member-meta { font-size: 13px; color: var(--muted); display: grid; gap: 2px; }
+.chips-woj { display: flex; flex-wrap: wrap; gap: 4px; }
+.woj { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--sunk); border: 1px solid var(--line); }
+.woj.wsp { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.member-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.stan { display: inline-flex; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.stan.ok { background: var(--ok-soft); color: var(--ok); }
+.stan.nieob { background: #dff5f1; color: #0f766e; }
+.stan.odchodzi { background: var(--warn-soft); color: var(--warn); }
+.stan.off { background: var(--idle-soft); color: var(--idle); }
+.nieob-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.nieob-row:first-child { border-top: 0; }
+.nieob-row .grow { flex: 1; min-width: 200px; }
+.nieob-row.anulowana { opacity: .5; text-decoration: line-through; }
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: calc(100% - 32px); max-width: 580px; background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+dialog::backdrop { background: rgba(10, 18, 25, .45); }
+.dlg-body { padding: 22px; display: grid; gap: 14px; }
+.dlg-body h2 { margin: 0; font: 700 20px/1.2 var(--f-display); }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.form-grid .full { grid-column: 1 / -1; }
+.form-grid label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.form-grid input, .form-grid select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); font-weight: 400; }
+.woj-set { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0; }
+.woj-set legend { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 4px; }
+.woj-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; font-size: 14px; }
+.woj-boxes label { display: flex; gap: 6px; align-items: center; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); z-index: 20; max-width: calc(100% - 32px); }
+body:not(.admin) [data-admin] { display: none !important; }
+@media (max-width: 640px) { .form-grid, .woj-boxes { grid-template-columns: minmax(0, 1fr); } }
+
 /* ---------- logowanie ---------- */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
 .login { width: 100%; max-width: 400px; padding: 28px; display: grid; gap: 16px; box-shadow: var(--shadow); }
@@ -269,6 +320,7 @@ ol.tl li:last-child::before { display: none; }
     <nav class="tabs" role="tablist" aria-label="Widok">
       <button role="tab" id="tab-leady" aria-selected="true">Leady</button>
       <button role="tab" id="tab-handlowcy" aria-selected="false">Handlowcy</button>
+      <button role="tab" id="tab-zespol" aria-selected="false">Zespół</button>
     </nav>
     <div class="spacer"></div>
     <span class="sync" id="sync"></span>
@@ -318,7 +370,66 @@ ol.tl li:last-child::before { display: none; }
       </div>
       <div class="h-note">Ponowienia (ten sam klient pisze drugi raz) liczone są raz, na pierwszym zgłoszeniu. „Po SLA” = bez kontaktu ponad 1 dzień roboczy.</div>
     </section>
+
+    <section id="widok-zespol" hidden>
+      <div class="team-head">
+        <div>
+          <h2 class="team-title">Zespół handlowy</h2>
+          <p class="muted" style="margin:2px 0 0;font-size:14px">Województwa, nieobecności i odejścia. Zmiany działają w przydziale leadów w ciągu minuty.</p>
+        </div>
+        <div class="spacer"></div>
+        <span class="tag" id="rola"></span>
+        <button class="btn" type="button" id="dodaj-nieobecnosc" data-admin>+ Nieobecność</button>
+        <button class="btn primary" type="button" id="dodaj-handlowca" data-admin>+ Dodaj handlowca</button>
+      </div>
+      <div class="err" id="zespol-blad" role="alert"></div>
+
+      <div class="panel team-sec">
+        <h3 class="team-h3">Pokrycie województw</h3>
+        <div class="cover-grid" id="pokrycie"></div>
+      </div>
+
+      <div class="team-grid" id="karty-zespolu"></div>
+
+      <div class="panel team-sec">
+        <h3 class="team-h3">Nieobecności i zastępstwa</h3>
+        <div id="lista-nieobecnosci"></div>
+      </div>
+    </section>
   </main>
+
+  <dialog id="dlg-handlowiec" aria-labelledby="dlg-h-tytul">
+    <form method="dialog" id="form-handlowiec" class="dlg-body" novalidate>
+      <h2 id="dlg-h-tytul">Dodaj handlowca</h2>
+      <div class="form-grid">
+        <label for="h-nazwa">Imię i nazwisko<input id="h-nazwa" required></label>
+        <label for="h-email">E-mail<input id="h-email" type="email" required></label>
+        <label for="h-wa">WhatsApp (numer, np. 48601222333)<input id="h-wa" inputmode="tel"></label>
+        <label for="h-aktywny">Aktywny do (odejście – puste, jeśli bez końca)<input id="h-aktywny" type="date"></label>
+      </div>
+      <fieldset class="woj-set"><legend>Województwa</legend><div class="woj-boxes" id="h-woj"></div>
+        <p class="muted" style="margin:6px 0 0;font-size:12px">Województwo zaznaczone u dwóch osób to region wspólny – leady dzielone po równo.</p></fieldset>
+      <div class="err" id="h-blad" role="alert"></div>
+      <div class="dlg-actions"><button class="btn" value="cancel" formnovalidate type="submit">Anuluj</button><button class="btn primary" type="button" id="h-zapisz">Zapisz</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-nieobecnosc" aria-labelledby="dlg-n-tytul">
+    <form method="dialog" id="form-nieobecnosc" class="dlg-body" novalidate>
+      <h2 id="dlg-n-tytul">Nieobecność</h2>
+      <div class="form-grid">
+        <label for="n-kto">Kto<select id="n-kto" required></select></label>
+        <label for="n-powod">Powód<select id="n-powod"><option>urlop</option><option>L4</option><option>szkolenie</option><option>odejście</option><option>inne</option></select></label>
+        <label for="n-od">Od<input id="n-od" type="date" required></label>
+        <label for="n-do">Do (puste = bezterminowo)<input id="n-do" type="date"></label>
+        <label for="n-zast" class="full">Zastępca (dostaje nowe leady i widzi otwarte)<select id="n-zast"></select></label>
+      </div>
+      <div class="ok-msg" id="n-info" role="status"></div>
+      <div class="err" id="n-blad" role="alert"></div>
+      <div class="dlg-actions"><button class="btn" value="cancel" formnovalidate type="submit">Anuluj</button><button class="btn primary" type="button" id="n-zapisz">Zapisz</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -332,7 +443,10 @@ const ZAMYKA = ['dodzwoniono', 'umowione', 'niezainteresowany'];
 const ZDARZENIA = { import: 'wpisany do arkusza', utworzono: 'nowe zgłoszenie', duplikat: 'ponowienie tego samego klienta', mozliwy_duplikat: 'możliwy duplikat', przypisano: 'przydział', powiadomienie: 'powiadomienie', status: 'kontakt', sla: 'przekroczony czas reakcji' };
 const PROGI = [240, 480, 960]; // 4 h, 1 dzień, 2 dni robocze
 const KOLORY = ['#0e5c88', '#7c3aed', '#0f766e', '#b45309', '#be185d', '#4d7c0f', '#1d4ed8', '#9a3412'];
-let db = null, dane = { leady: [], historia: [], handlowcy: [] }, wybrany = null, timer = null, filtr = 'otwarte';
+let db = null, dane = { leady: [], historia: [], handlowcy: [], nieobecnosci: [] }, wybrany = null, timer = null, filtr = 'otwarte';
+let admin = false, zespolBlad = '', edytowany = null;
+const WOJEWODZTWA = ['dolnośląskie', 'kujawsko-pomorskie', 'lubelskie', 'lubuskie', 'łódzkie', 'małopolskie', 'mazowieckie', 'opolskie',
+  'podkarpackie', 'podlaskie', 'pomorskie', 'śląskie', 'świętokrzyskie', 'warmińsko-mazurskie', 'wielkopolskie', 'zachodniopomorskie'];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const zl = (v) => (Number(v) ? Number(v).toLocaleString('pl-PL') + ' zł' : '—');
@@ -419,15 +533,22 @@ async function wczytaj() {
   if (DEMO) {
     dane = await fetch('/demo.json').then((r) => r.json());
   } else {
-    const [l, h, hd] = await Promise.all([
+    const [l, h, hd, nb, ad] = await Promise.all([
       db.from('leady').select('*').order('data_zgloszenia', { ascending: false }),
       db.from('historia').select('*').order('czas', { ascending: true }),
       db.from('handlowcy').select('*').order('handlowiec_id'),
+      db.from('nieobecnosci').select('*').order('od_dnia', { ascending: true }),
+      db.from('crm_admini').select('email'),
     ]);
     const blad = l.error || h.error || hd.error;
     if (blad) { $('sync').classList.add('blad'); $('sync').textContent = 'Błąd wczytywania: ' + blad.message; return; }
-    dane = { leady: l.data, historia: h.data, handlowcy: hd.data };
+    // nieobecności i admini wymagają migracji supabase/migracja-zespol.sql – bez niej zakładka Zespół działa tylko do odczytu
+    zespolBlad = nb.error ? 'Brak tabeli nieobecności – uruchom w Supabase plik supabase/migracja-zespol.sql.' : '';
+    admin = !ad.error && ad.data.length > 0;
+    dane = { leady: l.data, historia: h.data, handlowcy: hd.data, nieobecnosci: nb.error ? [] : nb.data };
   }
+  dane.nieobecnosci = dane.nieobecnosci || [];
+  document.body.classList.toggle('admin', admin);
   dane.leady.sort((a, b) => String(b.data_zgloszenia).localeCompare(String(a.data_zgloszenia)));
   dane.historia.sort((a, b) => String(a.czas).localeCompare(String(b.czas)));
   const ost = dane.leady.map((x) => x.zsynchronizowano).filter(Boolean).sort().pop();
@@ -437,7 +558,7 @@ async function wczytaj() {
 
 // ---------- widoki ----------
 const unikalne = () => dane.leady.filter((l) => l.duplikat_typ !== 'pewny');
-function rysuj() { rysujKpi(); rysujChipy(); rysujListe(); rysujHandlowcow(); if (wybrany) rysujKarte(wybrany); }
+function rysuj() { rysujKpi(); rysujChipy(); rysujListe(); rysujHandlowcow(); rysujZespol(); if (wybrany) rysujKarte(wybrany); }
 
 function rysujKpi() {
   const u = unikalne(), bez = u.filter((l) => !l.pierwszy_kontakt);
@@ -610,16 +731,143 @@ $('handlowcy').addEventListener('click', (e) => {
   zakladka('leady'); $('f-opiekun').value = tr.dataset.op; filtr = 'wszystkie'; rysujChipy(); rysujListe();
 });
 
+// ---------- zespół (edycja tylko dla administratorów; zapis do Supabase, do arkusza trafia przez workflow 4) ----------
+const dzisISO = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Warsaw' });
+const dm = (d) => (d ? `${String(d).slice(8, 10)}.${String(d).slice(5, 7)}` : '');
+const wojLista = (h) => String(h.wojewodztwa || '').split(';').map((w) => w.trim()).filter(Boolean);
+const aktywnyDzis = (h) => !h.aktywny_do || dzisISO() <= String(h.aktywny_do).slice(0, 10);
+const nazwaId = (id) => (dane.handlowcy.find((h) => h.handlowiec_id === id) || {}).imie_nazwisko || id || '—';
+const nieobDzis = (id) => dane.nieobecnosci.find((n) => n.handlowiec_id === id && !n.anulowana && String(n.od_dnia) <= dzisISO() && (!n.do_dnia || dzisISO() <= String(n.do_dnia)));
+function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 4000); }
+function bladZapisu(e) {
+  if (!e) return '';
+  return /row-level security|permission|42501/i.test(e.message || '') ? 'Brak uprawnień – zespół mogą edytować tylko administratorzy CRM.' : 'Nie udało się zapisać: ' + e.message;
+}
+
+function rysujZespol() {
+  $('zespol-blad').textContent = zespolBlad;
+  $('rola').textContent = DEMO ? 'podgląd – bez edycji' : admin ? 'administrator – możesz edytować' : 'tylko odczyt – edycja dla administratorów';
+  const aktywni = dane.handlowcy.filter(aktywnyDzis);
+  // pokrycie województw
+  $('pokrycie').innerHTML = WOJEWODZTWA.map((w) => {
+    const kto = aktywni.filter((h) => wojLista(h).includes(w));
+    const klasa = !kto.length ? 'brak' : kto.length > 1 ? 'wspolny' : '';
+    const opis = kto.length ? kto.map((h) => { const n = nieobDzis(h.handlowiec_id); return esc(h.imie_nazwisko) + (n ? ` (nieob. → ${esc(nazwaId(n.zastepca_id))})` : ''); }).join(' / ') : 'brak opiekuna → Marek';
+    return `<div class="cover ${klasa}"><b>${esc(w)}</b><span>${opis}</span></div>`;
+  }).join('');
+  // karty handlowców
+  const otwarte = (id) => dane.leady.filter((l) => l.handlowiec_id === id && l.duplikat_typ !== 'pewny' && !['dodzwoniono', 'umowione', 'niezainteresowany'].includes(l.status)).length;
+  $('karty-zespolu').innerHTML = dane.handlowcy.map((h) => {
+    const n = nieobDzis(h.handlowiec_id);
+    const przyszla = dane.nieobecnosci.find((x) => x.handlowiec_id === h.handlowiec_id && !x.anulowana && String(x.od_dnia) > dzisISO());
+    let stan = '<span class="stan ok">aktywny</span>';
+    if (!aktywnyDzis(h)) stan = `<span class="stan off">nieaktywny od ${dm(h.aktywny_do)}</span>`;
+    else if (n) stan = `<span class="stan nieob">${esc(n.powod || 'nieobecny')} do ${n.do_dnia ? dm(n.do_dnia) : '…'} · zastępuje ${esc(nazwaId(n.zastepca_id))}</span>`;
+    else if (h.aktywny_do) stan = `<span class="stan odchodzi">aktywny do ${dm(h.aktywny_do)}</span>`;
+    const wspolne = (w) => aktywni.filter((x) => wojLista(x).includes(w)).length > 1;
+    return `<article class="panel member${aktywnyDzis(h) ? '' : ' nieaktywny'}">
+      <div class="member-top">${avatar(h.imie_nazwisko, true)}<div><b>${esc(h.imie_nazwisko)}</b><small>${esc(h.handlowiec_id)} · ${esc(h.email || '—')}</small></div></div>
+      <div>${stan}</div>
+      <div class="chips-woj">${wojLista(h).map((w) => `<span class="woj${wspolne(w) ? ' wsp' : ''}">${esc(w)}</span>`).join('') || '<span class="muted" style="font-size:13px">bez województw</span>'}</div>
+      <div class="member-meta"><span>WhatsApp: ${esc(h.whatsapp || '—')}</span><span>Otwarte leady: <b>${otwarte(h.handlowiec_id)}</b></span>${przyszla ? `<span>Zaplanowana nieobecność od ${dm(przyszla.od_dnia)}</span>` : ''}</div>
+      <div class="member-actions" data-admin><button class="btn" type="button" data-edytuj="${esc(h.handlowiec_id)}">Edytuj</button><button class="btn" type="button" data-nieob="${esc(h.handlowiec_id)}">Nieobecność</button></div>
+    </article>`;
+  }).join('');
+  // nieobecności
+  const lista = [...dane.nieobecnosci].sort((a, b) => String(b.od_dnia).localeCompare(String(a.od_dnia)));
+  $('lista-nieobecnosci').innerHTML = lista.length ? lista.map((n) => {
+    const trwa = !n.anulowana && String(n.od_dnia) <= dzisISO() && (!n.do_dnia || dzisISO() <= String(n.do_dnia));
+    const minela = n.do_dnia && String(n.do_dnia) < dzisISO();
+    return `<div class="nieob-row${n.anulowana ? ' anulowana' : ''}"><span class="grow"><b>${esc(nazwaId(n.handlowiec_id))}</b> – ${esc(n.powod || 'nieobecność')}, ${dm(n.od_dnia)} – ${n.do_dnia ? dm(n.do_dnia) : 'bezterminowo'} · zastępca: <b>${esc(nazwaId(n.zastepca_id))}</b></span>
+      ${n.anulowana ? '<span class="tag">anulowana</span>' : trwa ? '<span class="stan nieob">trwa</span>' : minela ? '<span class="tag">zakończona</span>' : '<span class="tag">zaplanowana</span>'}
+      ${!n.anulowana && !minela ? `<button class="btn" type="button" data-admin data-anuluj="${esc(n.id)}">Anuluj</button>` : ''}</div>`;
+  }).join('') : '<p class="muted" style="margin:0">Brak nieobecności.</p>';
+}
+
+function otworzHandlowca(id) {
+  edytowany = id ? dane.handlowcy.find((h) => h.handlowiec_id === id) : null;
+  const h = edytowany || {};
+  $('dlg-h-tytul').textContent = edytowany ? `Edytuj: ${h.imie_nazwisko}` : 'Dodaj handlowca';
+  $('h-nazwa').value = h.imie_nazwisko || ''; $('h-email').value = h.email || ''; $('h-wa').value = h.whatsapp || '';
+  $('h-aktywny').value = h.aktywny_do ? String(h.aktywny_do).slice(0, 10) : '';
+  const mam = new Set(wojLista(h));
+  $('h-woj').innerHTML = WOJEWODZTWA.map((w, i) => `<label for="hw-${i}"><input type="checkbox" id="hw-${i}" value="${esc(w)}"${mam.has(w) ? ' checked' : ''}> ${esc(w)}</label>`).join('');
+  $('h-blad').textContent = '';
+  $('dlg-handlowiec').showModal();
+}
+$('h-zapisz').addEventListener('click', async () => {
+  const nazwa = $('h-nazwa').value.trim(), email = $('h-email').value.trim().toLowerCase(), wa = $('h-wa').value.replace(/\D/g, '');
+  const woj = [...$('h-woj').querySelectorAll('input:checked')].map((c) => c.value);
+  if (!nazwa) return void ($('h-blad').textContent = 'Wpisz imię i nazwisko.');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return void ($('h-blad').textContent = 'Wpisz poprawny e-mail.');
+  if (wa && wa.length !== 9 && wa.length !== 11) return void ($('h-blad').textContent = 'Numer WhatsApp: 9 cyfr albo 48 + 9 cyfr.');
+  const rekord = { imie_nazwisko: nazwa, email, whatsapp: wa ? (wa.length === 9 ? '48' + wa : wa) : null, wojewodztwa: woj.join(';'), aktywny_do: $('h-aktywny').value || null, zmieniono: new Date().toISOString() };
+  $('h-zapisz').disabled = true;
+  let wynik;
+  if (edytowany) wynik = await db.from('handlowcy').update(rekord).eq('handlowiec_id', edytowany.handlowiec_id);
+  else {
+    const nr = Math.max(0, ...dane.handlowcy.map((h) => parseInt(String(h.handlowiec_id).replace(/\D/g, ''), 10) || 0)) + 1;
+    wynik = await db.from('handlowcy').insert({ handlowiec_id: 'H' + nr, ...rekord });
+  }
+  $('h-zapisz').disabled = false;
+  if (wynik.error) return void ($('h-blad').textContent = bladZapisu(wynik.error));
+  $('dlg-handlowiec').close();
+  toast(`Zapisano: ${nazwa}. Przydział leadów uwzględni zmianę w ciągu minuty.`);
+  wczytaj();
+});
+
+function otworzNieobecnosc(id) {
+  const opcje = (bez) => dane.handlowcy.filter((h) => aktywnyDzis(h) && h.handlowiec_id !== bez).map((h) => `<option value="${esc(h.handlowiec_id)}">${esc(h.imie_nazwisko)}</option>`).join('');
+  $('n-kto').innerHTML = dane.handlowcy.filter(aktywnyDzis).map((h) => `<option value="${esc(h.handlowiec_id)}"${h.handlowiec_id === id ? ' selected' : ''}>${esc(h.imie_nazwisko)}</option>`).join('');
+  const odswiezZast = () => { const k = $('n-kto').value; $('n-zast').innerHTML = '<option value="">— bez zastępcy (leady jak dotąd) —</option>' + opcje(k); };
+  $('n-kto').onchange = odswiezZast; odswiezZast();
+  $('n-od').value = dzisISO(); $('n-do').value = ''; $('n-powod').value = 'urlop';
+  $('n-blad').textContent = ''; $('n-info').textContent = '';
+  $('dlg-nieobecnosc').showModal();
+}
+$('n-zapisz').addEventListener('click', async () => {
+  const rekord = { handlowiec_id: $('n-kto').value, od_dnia: $('n-od').value, do_dnia: $('n-do').value || null, zastepca_id: $('n-zast').value || null, powod: $('n-powod').value };
+  if (!rekord.handlowiec_id || !rekord.od_dnia) return void ($('n-blad').textContent = 'Wybierz osobę i datę początku.');
+  if (rekord.do_dnia && rekord.do_dnia < rekord.od_dnia) return void ($('n-blad').textContent = 'Data końca jest wcześniejsza niż początek.');
+  // zastępca sam nieobecny w tym czasie?
+  const kolizja = rekord.zastepca_id && dane.nieobecnosci.find((n) => n.handlowiec_id === rekord.zastepca_id && !n.anulowana &&
+    String(n.od_dnia) <= (rekord.do_dnia || '9999-12-31') && rekord.od_dnia <= (n.do_dnia || '9999-12-31'));
+  if (kolizja && !$('n-zapisz').dataset.potwierdzone) {
+    $('n-info').textContent = `Uwaga: ${nazwaId(rekord.zastepca_id)} ma w tym czasie nieobecność (${dm(kolizja.od_dnia)}–${kolizja.do_dnia ? dm(kolizja.do_dnia) : '…'}). Kliknij Zapisz jeszcze raz, żeby potwierdzić.`;
+    $('n-zapisz').dataset.potwierdzone = '1'; return;
+  }
+  delete $('n-zapisz').dataset.potwierdzone;
+  const s = await db.auth.getSession();
+  $('n-zapisz').disabled = true;
+  const wynik = await db.from('nieobecnosci').insert({ ...rekord, utworzyl: s.data.session ? s.data.session.user.email : null });
+  $('n-zapisz').disabled = false;
+  if (wynik.error) return void ($('n-blad').textContent = bladZapisu(wynik.error));
+  $('dlg-nieobecnosc').close();
+  toast(`Zapisano nieobecność: ${nazwaId(rekord.handlowiec_id)}${rekord.zastepca_id ? ` → zastępuje ${nazwaId(rekord.zastepca_id)}` : ''}.`);
+  wczytaj();
+});
+$('widok-zespol').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'dodaj-handlowca') return otworzHandlowca(null);
+  if (b.id === 'dodaj-nieobecnosc') return otworzNieobecnosc(null);
+  if (b.dataset.edytuj) return otworzHandlowca(b.dataset.edytuj);
+  if (b.dataset.nieob) return otworzNieobecnosc(b.dataset.nieob);
+  if (b.dataset.anuluj) {
+    if (b.dataset.pewne !== '1') { b.dataset.pewne = '1'; b.textContent = 'Na pewno anulować?'; return; }
+    const w = await db.from('nieobecnosci').update({ anulowana: true }).eq('id', b.dataset.anuluj);
+    if (w.error) return void ($('zespol-blad').textContent = bladZapisu(w.error));
+    toast('Nieobecność anulowana.'); wczytaj();
+  }
+});
+
 // ---------- zakładki ----------
 function zakladka(nazwa) {
-  $('tab-leady').setAttribute('aria-selected', nazwa === 'leady');
-  $('tab-handlowcy').setAttribute('aria-selected', nazwa === 'handlowcy');
-  $('widok-leady').hidden = nazwa !== 'leady';
-  $('widok-handlowcy').hidden = nazwa !== 'handlowcy';
+  ['leady', 'handlowcy', 'zespol'].forEach((z) => { $('tab-' + z).setAttribute('aria-selected', nazwa === z); $('widok-' + z).hidden = nazwa !== z; });
   try { localStorage.setItem('crm-zakladka', nazwa); } catch (e) {}
 }
 $('tab-leady').addEventListener('click', () => zakladka('leady'));
 $('tab-handlowcy').addEventListener('click', () => zakladka('handlowcy'));
+$('tab-zespol').addEventListener('click', () => zakladka('zespol'));
 try { const z = localStorage.getItem('crm-zakladka'); if (z) zakladka(z); } catch (e) {}
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && wybrany) zamknij(); });
 </script>

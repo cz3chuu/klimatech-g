@@ -25,7 +25,9 @@ async function demo() {
     czeka_min: r.pierwszy_kontakt ? null : core.businessMinutes(r.data_zgloszenia, teraz),
     zsynchronizowano: teraz,
   }));
-  return { leady, historia: historia.map((h, i) => ({ id: String(i), ...h })), handlowcy };
+  // przykładowa nieobecność – pokazuje zakładkę Zespół w podglądzie
+  const nieobecnosci = [{ id: 'demo-1', handlowiec_id: 'H1', od_dnia: '2026-10-07', do_dnia: '2026-10-20', zastepca_id: 'H2', powod: 'L4', anulowana: false }];
+  return { leady, historia: historia.map((h, i) => ({ id: String(i), ...h })), handlowcy, nieobecnosci };
 }
 
 function config() {
