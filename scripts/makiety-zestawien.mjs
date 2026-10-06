@@ -45,13 +45,42 @@ writeFileSync('docs/makiety/zestawienie-marka.html', strona('Zestawienie dla Mar
 writeFileSync('docs/makiety/zestawienie-handlowca.html', strona(`Zestawienie dla handlowca – ${osobiste.osoba.nazwa}`, naglowekMaila(osobiste.email) + osobiste.email.html));
 writeFileSync('docs/makiety/whatsapp.html', strona('Zestawienia na WhatsApp',
   `<div style="background:#efeae2;padding:8px 0 24px">${dymek(osobiste.osoba.nazwa, osobiste.whatsapp.message)}${dymek('Marek', z.marek.whatsapp.message)}</div>`));
+const m = z.marek.liczby, o = osobiste.liczby;
+const opisMarka = `nowe ${m.nowe}, obsłużone ${m.obsluzone}, w terminie doby ${m.wTerminie}, otwarte ${m.otwarte}, po terminie ${m.poTerminie}, eskalacje ${m.eskalacje}`;
+const opisHandlowca = `zadzwoń dziś ${o.doTelefonuDzis}, nowe ${o.nowe}, otwarte ${o.otwarte}, wczoraj obsłużone ${o.obsluzone}`;
+const doAkceptacji = `<ol style="margin:8px 0 0;padding-left:20px">
+<li>Godzina wysyłki: <b>8:00 w dni robocze</b> (pn–pt, bez świąt); „wczoraj” = od 8:00 poprzedniego dnia roboczego, w poniedziałek z weekendem.</li>
+<li>Handlowiec: sekcje <b>przypomnij dziś · nowe · jeszcze nieobsłużone · wczoraj obsłużone</b>; widzi wyłącznie swoje leady (i leady osoby, którą zastępuje).</li>
+<li>Marek: <b>liczby zespołu, tabela handlowców, eskalacje (ponad 2 dni robocze), po terminie doby, duże leady, wczoraj obsłużone</b> – zamiast osobnego maila przy każdym leadzie po 48 h.</li>
+<li>Kanał: <b>mail z pełną listą + krótki WhatsApp</b> (5 najpilniejszych). Czy Marek chce też WhatsApp, czy wystarczy mail?</li>
+<li>Czy w zestawieniu Marka mają być też wszystkie otwarte leady, czy tylko problemy (jak na makiecie)?</li>
+</ol>`;
 writeFileSync('docs/makiety/index.html', strona('Makiety porannych zestawień', `<div style="max-width:680px;margin:24px auto;padding:0 16px;font:15px/1.5 Arial,sans-serif;color:#142029">
 <h1 style="font-size:22px;margin:0 0 8px">Poranne zestawienia – makiety do akceptacji</h1>
-<p style="margin:0 0 16px;color:#5d6a76">Codziennie o 8:00 w dni robocze. Wygenerowane tym samym kodem, który będzie je wysyłał, na danych z eksportu (stan na ${esc(NOW)}).</p>
+<p style="margin:0 0 16px;color:#5d6a76">Wygenerowane tym samym kodem, który będzie je wysyłał, na danych z eksportu (stan na ${esc(NOW)}).</p>
 <ol>
-<li><a href="zestawienie-marka.html">Zbiorcze dla Marka (mail)</a> – ${esc(JSON.stringify(z.marek.liczby))}</li>
-<li><a href="zestawienie-handlowca.html">Osobiste dla handlowca (mail) – ${esc(osobiste.osoba.nazwa)}</a></li>
+<li><a href="zestawienie-marka.html">Zbiorcze dla Marka (mail)</a> – ${esc(opisMarka)}</li>
+<li><a href="zestawienie-handlowca.html">Osobiste dla handlowca (mail) – ${esc(osobiste.osoba.nazwa)}</a> – ${esc(opisHandlowca)}</li>
 <li><a href="whatsapp.html">Wersje WhatsApp (handlowiec i Marek)</a></li>
+<li><a href="komplet.html">Wszystko na jednej stronie (do wysłania jednym plikiem)</a></li>
 </ol>
-<p style="color:#5d6a76;font-size:14px">Każdy handlowiec dostaje tylko swoje leady. Zestawienie dostają w tym dniu: ${z.osobiste.map((o) => esc(o.osoba.nazwa)).join(', ')} oraz Marek.</p></div>`));
+<h2 style="font-size:16px;margin:20px 0 0">Do akceptacji</h2>${doAkceptacji}
+<p style="color:#5d6a76;font-size:14px">Każdy handlowiec dostaje tylko swoje leady. Zestawienie dostają w tym dniu: ${z.osobiste.map((x) => esc(x.osoba.nazwa)).join(', ')} oraz Marek.</p></div>`));
+
+// Komplet: oba zestawienia i WhatsApp na jednej stronie – jeden plik do maila
+const naglowekSekcji = (t, opis) => `<div style="max-width:680px;margin:32px auto 0;padding:0 16px;font:15px/1.5 Arial,sans-serif;color:#142029"><h2 style="font-size:19px;margin:0">${t}</h2><p style="margin:2px 0 0;color:#5d6a76">${opis}</p></div>`;
+const tresc = `<div style="max-width:680px;margin:24px auto 0;padding:0 16px;font:15px/1.5 Arial,sans-serif;color:#142029">
+<h1 style="font-size:24px;margin:0 0 6px">Klimatech – poranne zestawienia (makiety do akceptacji)</h1>
+<p style="margin:0;color:#5d6a76">Prawdziwe dane z eksportu arkusza, stan na ${esc(NOW)}. Wygenerowane tym samym kodem, który będzie je wysyłał.</p>
+<div style="margin-top:14px;padding:12px 14px;background:#ffffff;border:1px solid #e1e6eb;border-radius:10px"><b>Do akceptacji</b>${doAkceptacji}</div></div>
+${naglowekSekcji('1. Zbiorcze dla Marka – mail', esc(opisMarka))}${naglowekMaila(z.marek.email)}${z.marek.email.html}
+${naglowekSekcji(`2. Osobiste dla handlowca – mail (${esc(osobiste.osoba.nazwa)})`, esc(opisHandlowca))}${naglowekMaila(osobiste.email)}${osobiste.email.html}
+${naglowekSekcji('3. Wersje WhatsApp', 'Krótko – do przeczytania w trasie; pełna lista w mailu.')}
+<div style="background:#efeae2;padding:8px 0 24px;margin-top:12px">${dymek(osobiste.osoba.nazwa, osobiste.whatsapp.message)}${dymek('Marek', z.marek.whatsapp.message)}</div>`;
+writeFileSync('docs/makiety/komplet.html', strona('Klimatech – poranne zestawienia (makiety)', tresc));
+// Wersja do publikacji jako strona (bez szkieletu dokumentu – dokłada go publikacja)
+const artefakt = process.argv.indexOf('--strona') > -1 ? process.argv[process.argv.indexOf('--strona') + 1] : '';
+if (artefakt) writeFileSync(artefakt, `<title>Poranne zestawienia Klimatech</title>
+<style>:root{color-scheme:light}body{background:#f2f4f6;color:#142029;margin:0}a{color:#0e5c88}</style>
+${pasek}${tresc}`);
 console.log(`Makiety (${NOW}) -> docs/makiety/: Marek ${JSON.stringify(z.marek.liczby)} · ${osobiste.osoba.nazwa} ${JSON.stringify(osobiste.liczby)}`);
